@@ -51,6 +51,7 @@ function App() {
   const [splash, setSplash] = useState(false);
   const [suggestions, setSuggestions] = useState(BASE_SUGGESTIONS);
   const [autoListen, setAutoListen] = useState(true);
+  const [muted, setMuted] = useState(false);
   const [drafts, setDrafts] = useState(() => JSON.parse(localStorage.getItem("wdDrafts") || "[]"));
   const recognitionRef = useRef(null);
   const autoTimerRef = useRef(null);
@@ -171,6 +172,13 @@ function App() {
   }
 
   function speak(text, continueListening = false) {
+    if (muted) {
+      if (continueListening && autoListen) {
+        clearTimeout(autoTimerRef.current);
+        autoTimerRef.current = setTimeout(() => startListening(true), 2300);
+      }
+      return;
+    }
     if (!window.speechSynthesis) return;
     clearTimeout(autoTimerRef.current);
     window.speechSynthesis.cancel();
@@ -317,6 +325,7 @@ function App() {
           <small>{voiceLabel}</small>
         </button>
         <button className="stopTop" onClick={() => { stopSpeaking(); stopRecognition(); }} title="Stop voice">■</button>
+        <button className={`muteTop ${muted ? "muted" : ""}`} onClick={() => { setMuted(v => !v); if (!muted) stopSpeaking(); }} title={muted ? "Unmute AI voice" : "Mute AI voice"} aria-label={muted ? "Unmute AI voice" : "Mute AI voice"}>{muted ? "◌̸" : "၊၊||၊"}<small>{muted ? "MUTED" : "VOICE"}</small></button>
         <button className="autoTop" onClick={() => setAutoListen(v => !v)} title="Automatic listening after responses">AUTO {autoListen ? "ON" : "OFF"}</button>
         <button className="avatar" onClick={() => setProfileOpen(true)} title="Open employee profile">{(d.p?.displayName || account.name || "A").slice(0,1).toUpperCase()}</button>
       </div>
@@ -341,9 +350,9 @@ function App() {
       <main>
         {toast && <div className="toast"><span>✦</span>{toast}<button onClick={() => setToast("")}>×</button></div>}
         {mod === "home" && <Home p={d.p} m={d.m} c={d.c} ask={ask} set={setMod} suggestions={suggestions}/>} 
-        {mod === "copilot" && <Copilot msgs={msgs} q={q} setQ={setQ} ask={ask} state={state} voice={toggleVoice} stop={() => { stopSpeaking(); stopRecognition(); }} modal={setModal} suggestions={suggestions} autoListen={autoListen}/>} 
+        {mod === "copilot" && <Copilot msgs={msgs} q={q} setQ={setQ} ask={ask} state={state} voice={toggleVoice} stop={() => { stopSpeaking(); stopRecognition(); }} modal={setModal} suggestions={suggestions} autoListen={autoListen} muted={muted} setMuted={setMuted}/>} 
         {mod === "mail" && <Mail m={d.m} ask={ask} reply={openReply} flag={doFlag} important={doImportant}/>} 
-        {mod === "calendar" && <Calendar c={d.c}/>} 
+        {mod === "calendar" && <Calendar c={d.c} ask={ask}/>} 
         {mod === "commit" && <Commit ask={ask}/>} 
         {mod === "projects" && <Projects/>}
         {mod === "waiting" && <Waiting ask={ask}/>} 
@@ -386,14 +395,14 @@ function Home({p,m,c,ask,set,suggestions}) {
 function K({n,l,s,cl}){return <div className="kpi"><i className={cl}/><div><b>{n}</b><strong>{l}</strong><small>{s}</small></div></div>}
 function Title({k,t}){return <div className="title"><div><small>{k}</small><h3>{t}</h3></div></div>}
 
-function Copilot({msgs,q,setQ,ask,state,voice,stop,modal,suggestions,autoListen}) {
+function Copilot({msgs,q,setQ,ask,state,voice,stop,modal,suggestions,autoListen,muted,setMuted}) {
   return <div className="cp"><div className="cphead"><div><small>CONVERSATIONAL WORK INTERFACE</small><h2>Workday Copilot</h2><p>Ask anything about your current work context.</p></div><span className={`status ${state}`}><i/>{state==="listening"?"Listening":state==="thinking"?"Thinking":state==="speaking"?"AI speaking":"Ready"}</span></div>
     <div className="stage"><Orb mode={state}/><div className="stageText"><strong>{state==="listening"?"LISTENING":state==="thinking"?"ANALYZING YOUR WORK CONTEXT":state==="speaking"?"AI IS SPEAKING":"READY FOR YOUR COMMAND"}</strong><p>{state==="listening"?"Speak naturally. Say “stop” to cancel.":state==="thinking"?"Connecting mail, calendar and workplace context…":state==="speaking"?"You can stop the response at any time.":"Your workday context is ready."}</p></div>
-      <div className="voiceControl"><button className={state==="listening"?"listeningBtn":""} onClick={voice}>{state==="listening"?"◼ Stop listening":"◉ Voice command"}</button>{state==="speaking"&&<button onClick={stop}>■ Stop response</button>}<label><span className={autoListen?"toggle on":"toggle"}/><input type="checkbox" checked={autoListen} onChange={()=>{}} readOnly/> Auto-listen after response</label></div>
+      <div className="voiceControl"><button className={state==="listening"?"listeningBtn":""} onClick={voice}>{state==="listening"?"◼ Stop listening":"◉ Voice command"}</button>{state==="speaking"&&<button onClick={stop}>■ Stop response</button>}<button className={`muteVoice ${muted?"muted":""}`} onClick={()=>{setMuted(v=>!v);if(!muted)stop();}} title={muted?"Unmute AI response":"Mute AI response"}>{muted?"◌̸":"🔇"} {muted?"Unmute AI":"Mute AI"}</button><label><span className={autoListen?"toggle on":"toggle"}/><input type="checkbox" checked={autoListen} onChange={()=>{}} readOnly/> Auto-listen after response</label></div>
     </div>
     <div className="chat">{msgs.length===0&&<div className="empty"><h3>What can I help you with?</h3><p>Try a command below. I’ll use your authorized work context and remember this conversation locally.</p></div>}{msgs.map((m,i)=><div className={`msg ${m.r}`} key={i}><span>{m.r==="u"?"A":"✦"}</span><div><div className="msgLabel">{m.r==="u"?"YOU":"WORKDAY COPILOT"}</div>{m.t.split("\n").map((x,j)=><p key={j}>{x||" "}</p>)}{m.actions?.length>0&&<div className="actionButtons">{m.actions.map((x,j)=><button key={j} onClick={()=>modal(x)}>{x.label||"Review action"} →</button>)}</div>}</div></div>)}</div>
     <div className="quick">{suggestions.map(x=><button key={x} onClick={()=>ask(x)}>{x}</button>)}</div>
-    <div className="input"><button className={state==="listening"?"micLive":""} onClick={voice}>{state==="listening"?"◼":"◉"}</button><input value={q} onChange={e=>setQ(e.target.value)} onKeyDown={e=>e.key==="Enter"&&ask(q)} placeholder="Ask your workday copilot…"/><button onClick={()=>ask(q)}>↑</button></div>
+    <div className="input"><button className={`inputMute ${muted?"muted":""}`} onClick={()=>{setMuted(v=>!v);if(!muted)stop();}} title={muted?"Unmute AI response":"Mute AI response"} aria-label={muted?"Unmute AI response":"Mute AI response"}>{muted?"◌̸":"🔇"}</button><button className={state==="listening"?"micLive":""} onClick={voice}>{state==="listening"?"◼":"🎙️"}</button><input value={q} onChange={e=>setQ(e.target.value)} onKeyDown={e=>e.key==="Enter"&&ask(q)} placeholder="Ask your workday copilot…"/><button onClick={()=>ask(q)}>↑</button></div>
   </div>;
 }
 

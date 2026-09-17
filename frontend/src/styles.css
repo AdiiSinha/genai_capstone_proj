@@ -14,3 +14,42 @@ main{padding:31px 32px;overflow:auto;position:relative;min-width:0}.right{border
 .login,.splash{min-height:100vh;background:radial-gradient(circle at 45% 45%,#0c3150,#07172c 30%,#040b18 68%);display:grid;place-items:center;position:relative;overflow:hidden}.scan{position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent 0 5px,#35e9ff04 6px)}.loginOrb{position:absolute;left:14%;width:460px;height:460px;border:1px solid #35e9ff33;border-radius:50%;display:grid;place-items:center;box-shadow:0 0 90px #147bff22}.loginOrb:before{content:"";position:absolute;inset:55px;border:1px solid #a17cff44;border-radius:50%;animation:spin 16s linear infinite}.loginOrb div{width:165px;height:165px;border-radius:50%;background:radial-gradient(circle,#bfffff,#36e9ff 9%,#1470ff 35%,#07152d 72%);box-shadow:0 0 50px #35e9ff,0 0 120px #147bff66;animation:core 2s infinite}.loginText{z-index:2;margin-left:540px;width:450px}.loginText small{color:#35e9ff;font-size:10px;letter-spacing:2px}.loginText h1{font:700 68px/.88 'Space Grotesk',Arial;letter-spacing:-4px;margin:18px 0}.loginText h1 span{color:#35e9ff}.loginText p{color:#7f96ae;font-size:13px;line-height:1.65}.loginText button{margin-top:21px;background:linear-gradient(135deg,#106bc5,#5b4db6);color:#fff;border:1px solid #35e9ff66;padding:14px 18px;border-radius:9px;font-weight:700}.loginText button b{margin-left:45px}.loginText i{display:block;color:#4e6781;font-size:9px;font-style:normal;margin-top:12px}.splash{text-align:center}.splash .orb{margin:auto}.splash>small{color:#35e9ff;font-size:9px;letter-spacing:2px}.splash h2{font-family:'Space Grotesk';font-size:29px;margin:10px}.splash p{color:#7088a1;font-size:11px}.load{width:230px;height:2px;background:#17304b;margin:18px}.load:after{content:"";display:block;height:100%;background:#35e9ff;width:0;animation:load 1.5s forwards}.tags{color:#54718e;font-size:8px;letter-spacing:1px}@keyframes load{to{width:100%}}
 .back,.profileBack{position:fixed;inset:0;background:#000b;backdrop-filter:blur(10px);z-index:50;display:grid;place-items:center;padding:20px}.modal,.profileCard{width:min(680px,94vw);background:linear-gradient(145deg,#09223b,#061426);border:1px solid #38eaff44;border-radius:16px;padding:21px;box-shadow:0 30px 100px #000}.modalClose{float:right;border:0;background:transparent;color:#8aa2bb;font-size:23px}.modal>small,.profileHero small{color:var(--cyan);font-size:9px;letter-spacing:1.6px}.modal h2,.profileHero h2{font-family:'Space Grotesk';font-size:26px;margin:7px 0}.modal>p{font-size:10px;color:#d5ae6b;background:#3b2a1022;padding:10px;border-radius:8px}.modal label{display:block;color:#7892aa;font-size:9px;margin-top:12px}.recipientRow{display:grid;grid-template-columns:1fr 1fr;gap:10px}.modal input,.modal textarea{width:100%;margin-top:5px;background:#061426;color:#fff;border:1px solid #75bfff1d;border-radius:8px;padding:10px;outline:0;font-size:11px}.modal textarea{resize:vertical;line-height:1.5}.draftInfo{font-size:9px;color:#5f7b95;margin-top:8px}.modal footer{display:flex;justify-content:flex-end;gap:8px;margin-top:15px}.modal footer button{padding:9px 12px;border-radius:8px;background:#0a1d32;color:#8da6bf;border:1px solid #75bfff16;font-size:9px}.modal footer .sendBtn{color:var(--cyan);border-color:#38eaff55;background:#38eaff0d}.profileBack{z-index:55;justify-items:end;align-items:start;padding:88px 25px}.profileCard{width:min(470px,92vw);animation:profileIn .22s ease-out}.profileHero{display:flex;gap:13px;align-items:center;border-bottom:1px solid var(--line);padding-bottom:16px}.profileAvatar{width:58px;height:58px;border-radius:18px;background:radial-gradient(circle at 35% 25%,#4feeff,#1974ff 50%,#654cff);display:grid;place-items:center;font:700 23px 'Space Grotesk';box-shadow:0 0 25px #268dff44}.profileHero h2{font-size:23px;margin:4px 0}.profileHero p{margin:0;color:#7892aa;font-size:10px}.profileGrid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:15px}.info{border:1px solid var(--line);background:#061527;border-radius:9px;padding:11px}.info small{display:block;color:#607c96;font-size:8px;margin-bottom:4px}.info b{font-size:10px;word-break:break-word}.profileNote{margin-top:13px;color:#69839c;font-size:9px;line-height:1.5;background:#071b2e;border-radius:8px;padding:10px}.profileNote b{color:#9dc8e5}@keyframes profileIn{from{opacity:0;transform:translateY(-8px) scale(.98)}to{opacity:1;transform:none}}
 @media(max-width:1150px){.layout{grid-template-columns:185px 1fr}.right{display:none}.kpis{grid-template-columns:1fr 1fr}.loginOrb{left:4%}.loginText{margin-left:430px}}@media(max-width:760px){header{height:68px;padding:0 12px}.brand span{font-size:12px}.live,.autoTop,.top .stopTop{display:none}.layout{display:block}aside{display:none}main{padding:22px 16px}.two,.work{grid-template-columns:1fr}.cards{grid-template-columns:1fr}.hero{display:block}.hero>span{display:block;margin-top:8px}.kpis{grid-template-columns:1fr 1fr}.stage{min-height:310px}.stage .orb{--s:175px}.recipientRow{grid-template-columns:1fr}.profileBack{padding:75px 12px}.profileCard{width:100%}.loginOrb{opacity:.3;left:calc(50% - 220px)}.loginText{margin:0;padding:25px;width:auto}.loginText h1{font-size:49px}.loginText p{font-size:11px}}
+
+
+/* === POLISHED VOICE CONTROLS & SCROLLBARS === */
+html{scroll-behavior:smooth}
+*{scrollbar-width:thin;scrollbar-color:#168fbd #061322}
+*::-webkit-scrollbar{width:9px;height:9px}
+*::-webkit-scrollbar-track{background:linear-gradient(180deg,#040d18,#071729);border-left:1px solid #38eaff08;border-radius:999px}
+*::-webkit-scrollbar-thumb{background:linear-gradient(180deg,#38eaff,#247dff 55%,#6658d8);border:2px solid #061322;border-radius:999px;box-shadow:0 0 10px #38eaff33}
+*::-webkit-scrollbar-thumb:hover{background:linear-gradient(180deg,#7cffff,#38aaff 55%,#8a75ff);box-shadow:0 0 16px #38eaff66}
+*::-webkit-scrollbar-corner{background:#061322}
+main,.chat,.quick{scrollbar-width:thin;scrollbar-color:#1b9ecb #061322}
+main::-webkit-scrollbar,.chat::-webkit-scrollbar,.quick::-webkit-scrollbar{width:9px;height:8px}
+main::-webkit-scrollbar-track,.chat::-webkit-scrollbar-track,.quick::-webkit-scrollbar-track{background:#061322;border-radius:999px}
+main::-webkit-scrollbar-thumb,.chat::-webkit-scrollbar-thumb,.quick::-webkit-scrollbar-thumb{background:linear-gradient(180deg,#35e9ff,#287dff,#695cff);border:2px solid #061322;border-radius:999px}
+main::-webkit-scrollbar-thumb:hover,.chat::-webkit-scrollbar-thumb:hover,.quick::-webkit-scrollbar-thumb:hover{background:linear-gradient(180deg,#8fffff,#3bb8ff,#9585ff)}
+.top .muteTop{height:38px;min-width:66px;border-radius:11px;padding:0 9px;display:flex;align-items:center;justify-content:center;gap:5px;color:#9ec5db}
+.top .muteTop small{font-size:7px;font-weight:800;letter-spacing:.8px}
+.top .muteTop.muted{color:#ff8492;border-color:#ff617544;background:#3a121b;box-shadow:0 0 18px #ff61751c}
+.top .muteTop:not(.muted) .voiceGlyph{color:var(--cyan)}
+.muteTop{position:relative;overflow:hidden}
+.muteTop:after{content:"";position:absolute;inset:-40%;background:radial-gradient(circle,#38eaff18,transparent 55%);opacity:0;transition:.25s}
+.muteTop:hover:after{opacity:1}
+.voiceControl .muteVoice{min-width:108px;transition:.25s}
+.voiceControl .muteVoice:hover{transform:translateY(-1px);box-shadow:0 0 18px #38eaff14}
+.voiceControl .muteVoice.muted{color:#ff8492;border-color:#ff617544;background:#3a121b}
+.inputMute{position:relative!important;overflow:hidden}
+.inputMute.muted{color:#ff8492!important;border-color:#ff617544!important;background:#3a121b!important;box-shadow:0 0 16px #ff617522}
+.inputMute:not(.muted){color:var(--cyan)}
+.inputMute:active,.muteTop:active,.muteVoice:active{transform:scale(.94)}
+@keyframes mutePulse{0%,100%{box-shadow:0 0 0 0 #ff617500}50%{box-shadow:0 0 0 5px #ff617512}}
+.muteTop.muted,.inputMute.muted{animation:mutePulse 2s ease-in-out infinite}
+
+/* slightly larger inner typography for readability without changing layout */
+.cp .msg>div{font-size:12px}
+.cp .msgLabel{font-size:9px}
+.cp .quick button{font-size:10px}
+.cp .input input{font-size:13px}
+.voiceControl button{font-size:10px}
+@media(max-width:760px){.top .muteTop{display:none}.cp .msg>div{font-size:11px}.cp .input input{font-size:12px}}

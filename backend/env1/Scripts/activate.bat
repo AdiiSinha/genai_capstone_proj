@@ -8,7 +8,7 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
-set "VIRTUAL_ENV=C:\Users\asinha8\Downloads\workday_copilot_full_ui_ai_project_updated\backend\env1"
+set "VIRTUAL_ENV=C:\Users\araj33\OneDrive - Capgemini\Desktop\genai_capstone_proj\backend\env1"
 
 if not defined PROMPT set PROMPT=$P$G
 
