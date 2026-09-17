@@ -3,6 +3,7 @@ import { tasks } from "../../data";
 import { K } from "../common/K";
 import { Title } from "../common/Title";
 import { Orb } from "../common/Orb";
+import { formatEventTime } from "../../calendarDate";
 
 export function Home({ p, m, c, ask, set, suggestions }) {
   const u = tasks.filter(x => x[3] === "critical" || x[3] === "high").length;
@@ -79,10 +80,7 @@ export function Home({ p, m, c, ask, set, suggestions }) {
           {c.slice(0, 3).map(x => (
             <div className="line" key={x.id}>
               <strong>
-                {new Date(x.start.dateTime).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit"
-                })}
+                {formatEventTime(x.start)}
               </strong>
               <div>
                 <b>{x.subject}</b>

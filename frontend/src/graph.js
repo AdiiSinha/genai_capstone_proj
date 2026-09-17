@@ -1,5 +1,5 @@
 const G = "https://graph.microsoft.com/v1.0";
-
+ 
 async function req(token, path, options = {}) {
   const r = await fetch(G + path, {
     ...options,
@@ -10,61 +10,327 @@ async function req(token, path, options = {}) {
       ...(options.headers || {})
     }
   });
+ 
   const text = await r.text();
+ 
   let data = {};
-  try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
-  if (!r.ok) throw Error(data?.error?.message || `Graph ${r.status}`);
+ 
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { raw: text };
+  }
+ 
+  if (!r.ok) {
+    throw Error(data?.error?.message || `Graph ${r.status}`);
+  }
+ 
   return data;
 }
-
-export const getProfile = token => req(
-  token,
-  "/me?$select=id,displayName,givenName,surname,mail,userPrincipalName,jobTitle,department,officeLocation,mobilePhone,businessPhones,preferredLanguage"
-);
-
-export const getMail = token => req(
-  token,
-  "/me/mailFolders/inbox/messages?$top=50&$orderby=receivedDateTime%20desc&$select=id,subject,from,receivedDateTime,bodyPreview,importance,isRead,hasAttachments,webLink,flag"
-);
-
-export const getCalendar = token => {
-  const a = new Date();
-  const b = new Date(Date.now() + 7 * 86400000);
-  return req(
+ 
+ 
+/* =========================================================
+   PROFILE
+========================================================= */
+ 
+export const getProfile = token =>
+  req(
     token,
-    `/me/calendarView?startDateTime=${encodeURIComponent(a.toISOString())}&endDateTime=${encodeURIComponent(b.toISOString())}&$top=50&$orderby=start/dateTime&$select=id,subject,start,end,location,organizer,isAllDay,webLink`
+    "/me?$select=id,displayName,givenName,surname,mail,userPrincipalName,jobTitle,department,officeLocation,mobilePhone,businessPhones,preferredLanguage"
   );
+ 
+ 
+/* =========================================================
+   MAIL - INBOX
+========================================================= */
+ 
+export const getMail = token =>
+  req(
+    token,
+    "/me/mailFolders/inbox/messages?$top=50&$orderby=receivedDateTime%20desc&$select=id,subject,from,toRecipients,receivedDateTime,body,bodyPreview,importance,isRead,hasAttachments,webLink,flag"
+  );
+ 
+ 
+/* =========================================================
+   MAIL - SENT ITEMS
+   Used by Commitment Intelligence
+========================================================= */
+ 
+export const getSentMail = async token => {
+ 
+  const select = [
+    "id",
+    "subject",
+    "from",
+    "toRecipients",
+    "ccRecipients",
+    "sentDateTime",
+    "body",
+    "bodyPreview",
+    "importance",
+    "hasAttachments",
+    "conversationId",
+    "webLink"
+  ].join(",");
+ 
+  let url =
+    `/me/mailFolders/sentitems/messages?$top=100&$orderby=sentDateTime%20desc&$select=${encodeURIComponent(select)}`;
+ 
+  const messages = [];
+ 
+  while (url) {
+ 
+    const data = await req(token, url);
+ 
+    if (Array.isArray(data.value)) {
+      messages.push(...data.value);
+    }
+ 
+    if (data["@odata.nextLink"]) {
+ 
+      const next = data["@odata.nextLink"];
+ 
+      url = next.startsWith(G)
+        ? next.substring(G.length)
+        : next;
+ 
+    } else {
+ 
+      url = null;
+    }
+  }
+ 
+  return {
+    value: messages
+  };
 };
+ 
+/* Fetch one complete message when the user opens evidence/details. */
+export const getMailMessage = (token, id) => req(
+  token,
+  `/me/messages/${encodeURIComponent(id)}?$select=id,subject,from,toRecipients,ccRecipients,sentDateTime,receivedDateTime,body,bodyPreview,webLink,conversationId,internetMessageId`
+);
 
-export const sendMail = (token, x) => req(token, "/me/sendMail", {
-  method: "POST",
-  body: JSON.stringify({
-    message: {
+ 
+export const sendMail = (token, x) =>
+  req(token, "/me/sendMail", {
+    method: "POST",
+    body: JSON.stringify({
+      message: {
+        subject: x.subject,
+ 
+        body: {
+          contentType: "Text",
+          content: x.body
+        },
+ 
+        toRecipients: (x.to || "")
+          .split(/[;,]/)
+          .map(v => v.trim())
+          .filter(Boolean)
+          .map(address => ({
+            emailAddress: {
+              address
+            }
+          })),
+ 
+        ccRecipients: (x.cc || "")
+          .split(/[;,]/)
+          .map(v => v.trim())
+          .filter(Boolean)
+          .map(address => ({
+            emailAddress: {
+              address
+            }
+          }))
+      },
+ 
+      saveToSentItems: true
+    })
+  })
+  .then(() => ({ success: true }));
+ 
+ 
+export const createDraft = (token, x) =>
+  req(token, "/me/messages", {
+    method: "POST",
+ 
+    body: JSON.stringify({
       subject: x.subject,
-      body: { contentType: "Text", content: x.body },
-      toRecipients: (x.to || "").split(/[;,]/).map(v => v.trim()).filter(Boolean).map(address => ({ emailAddress: { address } })),
-      ccRecipients: (x.cc || "").split(/[;,]/).map(v => v.trim()).filter(Boolean).map(address => ({ emailAddress: { address } }))
-    },
-    saveToSentItems: true
-  })
-}).then(() => ({ success: true }));
-
-export const createDraft = (token, x) => req(token, "/me/messages", {
-  method: "POST",
-  body: JSON.stringify({
-    subject: x.subject,
-    body: { contentType: "Text", content: x.body },
-    toRecipients: (x.to || "").split(/[;,]/).map(v => v.trim()).filter(Boolean).map(address => ({ emailAddress: { address } })),
-    ccRecipients: (x.cc || "").split(/[;,]/).map(v => v.trim()).filter(Boolean).map(address => ({ emailAddress: { address } }))
-  })
-});
-
-export const markImportant = (token, id) => req(token, `/me/messages/${encodeURIComponent(id)}`, {
-  method: "PATCH",
-  body: JSON.stringify({ importance: "high" })
-});
-
-export const flagMail = (token, id) => req(token, `/me/messages/${encodeURIComponent(id)}`, {
-  method: "PATCH",
-  body: JSON.stringify({ flag: { flagStatus: "flagged" } })
-});
+ 
+      body: {
+        contentType: "Text",
+        content: x.body
+      },
+ 
+      toRecipients: (x.to || "")
+        .split(/[;,]/)
+        .map(v => v.trim())
+        .filter(Boolean)
+        .map(address => ({
+          emailAddress: {
+            address
+          }
+        })),
+ 
+      ccRecipients: (x.cc || "")
+        .split(/[;,]/)
+        .map(v => v.trim())
+        .filter(Boolean)
+        .map(address => ({
+          emailAddress: {
+            address
+          }
+        }))
+    })
+  });
+ 
+ 
+export const markImportant = (token, id) =>
+  req(
+    token,
+    `/me/messages/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        importance: "high"
+      })
+    }
+  );
+ 
+ 
+export const flagMail = (token, id) =>
+  req(
+    token,
+    `/me/messages/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        flag: {
+          flagStatus: "flagged"
+        }
+      })
+    }
+  );
+ 
+ 
+/* =========================================================
+   CALENDAR
+   REAL MICROSOFT GRAPH DATA
+========================================================= */
+ 
+/*
+  Loads all calendar events available through /me/events.
+ 
+  Microsoft Graph is paginated, so we continue following
+  @odata.nextLink until there are no more pages.
+ 
+  This removes the old "next 7 days" limitation.
+*/
+ 
+export const getCalendar = async token => {
+ 
+  const select = [
+    "id",
+    "subject",
+    "bodyPreview",
+    "body",
+    "start",
+    "end",
+    "location",
+    "locations",
+    "organizer",
+    "attendees",
+    "isAllDay",
+    "isCancelled",
+    "isOnlineMeeting",
+    "onlineMeetingProvider",
+    "onlineMeeting",
+    "webLink",
+    "importance",
+    "showAs",
+    "responseStatus",
+    "sensitivity",
+    "isReminderOn",
+    "reminderMinutesBeforeStart",
+    "createdDateTime",
+    "lastModifiedDateTime",
+    "recurrence",
+    "seriesMasterId"
+  ].join(",");
+ 
+ 
+  let url =
+    `/me/events?$top=100&$orderby=start/dateTime&$select=${encodeURIComponent(select)}`;
+ 
+ 
+  const events = [];
+ 
+ 
+  while (url) {
+ 
+    const data = await req(token, url, {
+      headers: {
+        Prefer: 'outlook.timezone="UTC"'
+      }
+    });
+ 
+    if (Array.isArray(data.value)) {
+      events.push(...data.value);
+    }
+ 
+    /*
+      @odata.nextLink is a complete Graph URL.
+      req() normally prefixes G, so when nextLink is returned
+      we remove the Graph hostname.
+    */
+ 
+    if (data["@odata.nextLink"]) {
+ 
+      const next = data["@odata.nextLink"];
+ 
+      url = next.startsWith(G)
+        ? next.substring(G.length)
+        : next;
+ 
+    } else {
+ 
+      url = null;
+    }
+  }
+ 
+ 
+  return {
+    value: events
+  };
+};
+ 
+ 
+/* =========================================================
+   CALENDAR - UPDATE IMPORTANCE
+========================================================= */
+ 
+export const updateCalendarImportance = (token, id, important) =>
+  req(
+    token,
+    `/me/events/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+ 
+      body: JSON.stringify({
+        importance: important ? "high" : "normal"
+      })
+    }
+  );
+ 
+ 
+/* =========================================================
+   CALENDAR - OPTIONAL REFRESH SINGLE EVENT
+========================================================= */
+ 
+export const getCalendarEvent = (token, id) =>
+  req(
+    token,
+    `/me/events/${encodeURIComponent(id)}?$select=id,subject,body,bodyPreview,start,end,location,locations,organizer,attendees,isAllDay,isCancelled,isOnlineMeeting,onlineMeetingProvider,onlineMeeting,webLink,importance,showAs,responseStatus,sensitivity,isReminderOn,reminderMinutesBeforeStart,createdDateTime,lastModifiedDateTime,recurrence,seriesMasterId`
+  );
+ 

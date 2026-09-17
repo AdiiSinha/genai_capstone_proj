@@ -1,32 +1,21 @@
 import os
 import json
-import re
-from pathlib import Path
 import requests
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-# Resolve .env path relative to this file so it works regardless of CWD
-_ENV_PATH = Path(__file__).resolve().parent / ".env"
-
-# Initial load at startup
-load_dotenv(dotenv_path=_ENV_PATH, override=True)
+load_dotenv()
+KEY = os.getenv("GENAI_API_KEY", "")
+BASE = os.getenv("GENAI_BASE_URL", "").rstrip("/")
+MODEL = os.getenv("GENAI_MODEL", "")
 
 app = FastAPI(title="Workday Copilot AI")
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000"
-    ],
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]
@@ -37,78 +26,121 @@ class Req(BaseModel):
     context: dict = Field(default_factory=dict)
     memory: list = Field(default_factory=list)
 
+class CommitmentReq(BaseModel):
+    sent: list = Field(default_factory=list)
+    inbox: list = Field(default_factory=list)
+    now: str = ""
+    employee: dict = Field(default_factory=dict)
+
 SYSTEM = """
 You are Workday Copilot, a concise enterprise employee workday intelligence assistant.
+Use ONLY the supplied authorized context. Never invent people, emails, deadlines, projects,
+completion evidence, or actions. Mail may be real Microsoft Graph data.
 
-Your job is to turn the supplied authorized context into a short, useful answer.
-Use ONLY the supplied context. Do not invent people, emails, deadlines, meetings or actions.
-Teams/project/task data in this prototype is synthetic. Mail and calendar may be real Microsoft Graph data.
+Return JSON ONLY with exactly these top-level keys:
+{
+  "answer": "...",
+  "actions": [],
+  "suggestions": [],
+  "context_used": []
+}
 
-STYLE RULES:
-- Be crisp and professional. Prefer 1-5 short lines or bullets.
-- Do not dump raw JSON, IDs, timestamps, sender metadata, Graph fields, or technical implementation details.
-- For email-related requests, focus on SUBJECT and BODY/content only unless the user asks for sender/date/details.
-- If there are many emails, summarize only the important/actionable ones. Group duplicates or repeated information.
-- For 'catch me up', return only the most relevant updates, each as: Subject — concise body summary.
-- For 'what is urgent', prioritize deadlines, blockers and business impact.
-- For 'what should I do next', give one primary next action, then at most two follow-ups.
-- For commitments, say what was promised and by when.
-- For waiting/dependencies, say what is blocked and who/what is awaited if known.
-- For meeting preparation, return the meeting plus only the 2-4 most relevant preparation points.
-- Never claim an action was executed. Important actions require human approval.
+For normal requests, keep answer concise and professional.
+"""
 
-ACTIONS:
-Return optional UI actions only when genuinely useful. Supported action objects:
-{"label":"Draft reply","type":"draft_reply","to":"email","subject":"...","body":"..."}
-{"label":"Save draft","type":"save_draft","to":"email","subject":"...","body":"..."}
-{"label":"Mark important","type":"important"}
-{"label":"Flag for follow-up","type":"flag"}
-If you cannot safely determine the exact recipient, do not create a draft action.
+COMMITMENT_SYSTEM = """
+You are the Commitment Intelligence engine inside an enterprise employee copilot.
+The supplied SENT emails were written by the signed-in employee. The supplied INBOX emails
+were received by that employee. Analyze them semantically, not with keyword matching alone.
 
-SUGGESTIONS:
-Return 3-6 short follow-up commands that are directly grounded in the current answer/context. Avoid generic suggestions when a specific useful next action is obvious.
-Examples: "Draft a reply", "What is due before 4 PM?", "Prepare for the client demo", "Show important mail".
+A commitment is a promise, planned action, or explicit intention made BY THE SIGNED-IN EMPLOYEE.
+Examples include: "I'll send it by Friday", "I'll check this and get back to you",
+"I'll share the report tomorrow", "Let me take this", "I'll handle the deployment",
+"I can send the details later today".
+
+Do NOT create a commitment merely because someone asked the employee to do something.
+Do NOT invent a deadline when none is stated. "soon" remains no exact deadline.
+Understand natural-language deadlines such as today, tomorrow, Friday, EOD, next week,
+and deadlines relative to the email timestamp. Use the supplied current timestamp.
+
+Completion detection:
+- A commitment is completed only when a later supplied email contains credible evidence
+  that the employee fulfilled the promised action.
+- Prefer evidence from the employee's later SENT email, but an INBOX reply can corroborate
+  completion (for example, "Thanks for sending the report").
+- Never mark a commitment complete merely because time passed.
+- If evidence is ambiguous, keep it pending and explain why.
+
+Deduplicate multiple emails that clearly represent the same promise. Preserve the earliest
+promise as the source and include later related evidence.
+
+For every commitment return:
+{
+  "id": "stable local id",
+  "title": "short action title",
+  "action": "what the employee promised to do",
+  "recipientName": "name or empty string",
+  "recipientEmail": "email or empty string",
+  "project": "project/topic or empty string",
+  "promisedAt": "ISO timestamp",
+  "dueAt": "ISO timestamp or null",
+  "dueLabel": "human-readable deadline or 'No deadline'",
+  "originalQuote": "exact short sentence from source email",
+  "sourceId": "Graph message id",
+  "sourceSubject": "subject",
+  "sourceWebLink": "Graph webLink or empty string",
+  "status": "completed|overdue|due_today|due_soon|pending|no_deadline",
+  "priority": "high|medium|low",
+  "confidence": 0,
+  "confidenceReason": "brief evidence-based reason",
+  "risk": "high|medium|low|none",
+  "riskReason": "brief reason",
+  "completionDetected": true,
+  "completionAt": "ISO timestamp or null",
+  "completionEvidence": "exact short evidence sentence or empty string",
+  "completionSubject": "subject or empty string",
+  "completionWebLink": "webLink or empty string",
+  "relatedEmails": [
+    {"id":"...","direction":"sent|received","subject":"...","timestamp":"...","webLink":"..."}
+  ]
+}
+
+Rules:
+- confidence is 0-100.
+- status is based on now, dueAt, and verified completion evidence.
+- A due date without a time should use a reasonable end-of-day interpretation, but dueLabel
+  must preserve the wording actually stated.
+- If no deadline exists, dueAt must be null.
+- recipient should come from toRecipients when available; never guess a recipient.
+- project/topic should only be populated when supported by subject/content.
+- originalQuote must be a quote from supplied email content, not generated prose.
+- Return at most 30 distinct commitments, ordered: overdue, due today, due soon, pending,
+  no deadline, completed.
 
 Return JSON ONLY:
 {
-  "answer": "short professional answer",
-  "actions": [],
-  "suggestions": ["..."],
-  "context_used": []
+  "generatedAt": "ISO timestamp",
+  "summary": {"active":0,"dueToday":0,"overdue":0,"completed":0,"noDeadline":0},
+  "commitments": []
 }
 """
 
-
-def get_config():
-    # Reload environment variables on the fly in case .env was modified after startup
-    load_dotenv(dotenv_path=_ENV_PATH, override=True)
-    key = os.getenv("GENAI_API_KEY", "").strip()
-    base = os.getenv("GENAI_BASE_URL", "").rstrip("/")
-    model = os.getenv("GENAI_MODEL", "").strip()
-    return key, base, model
-
-
-def extract_json(text: str):
-    # Remove markdown code blocks if present
-    cleaned = text.replace("```json", "").replace("```", "").strip()
-    try:
-        return json.loads(cleaned)
-    except Exception:
-        # Fallback: search for first JSON object {...}
-        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(0))
-            except Exception:
-                pass
-    return None
-
+def provider_call(messages, temperature=0.1):
+    if not (KEY and BASE and MODEL):
+        raise RuntimeError("AI backend not configured. Fill backend/.env.")
+    payload = {"model": MODEL, "temperature": temperature, "messages": messages}
+    r = requests.post(
+        BASE + "/chat/completions",
+        headers={"Authorization": "Bearer " + KEY, "Content-Type": "application/json"},
+        json=payload,
+        timeout=90
+    )
+    if not r.ok:
+        raise RuntimeError(f"AI provider HTTP {r.status_code}: {r.text[:700]}")
+    content = r.json()["choices"][0]["message"]["content"]
+    return content.replace("```json", "").replace("```", "").strip()
 
 def call(q, c, memory):
-    key, base, model = get_config()
-    if not (key and base and model):
-        raise RuntimeError("AI backend not configured. Please fill GENAI_API_KEY, GENAI_BASE_URL, and GENAI_MODEL in backend/.env.")
-
     compact = {
         "profile": c.get("profile"),
         "emails": c.get("emails", [])[:40],
@@ -118,70 +150,100 @@ def call(q, c, memory):
         "projects": c.get("projects", [])[:10],
         "workplace": c.get("workplace", {})
     }
-    payload = {
-        "model": model,
-        "temperature": 0.18,
-        "messages": [
-            {"role": "system", "content": SYSTEM},
-            {"role": "user", "content":
-             "CONTEXT:\n" + json.dumps(compact, ensure_ascii=False) +
-             "\nRECENT CONVERSATION MEMORY:\n" + json.dumps(memory[-12:], ensure_ascii=False) +
-             "\nREQUEST:\n" + q}
-        ]
-    }
+    content = provider_call([
+        {"role": "system", "content": SYSTEM},
+        {"role": "user", "content":
+         "CONTEXT:\n" + json.dumps(compact, ensure_ascii=False) +
+         "\nRECENT CONVERSATION MEMORY:\n" + json.dumps(memory[-12:], ensure_ascii=False) +
+         "\nREQUEST:\n" + q}
+    ], temperature=0.18)
     try:
-        r = requests.post(
-            f"{base}/chat/completions",
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=60
-        )
-    except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"Failed to connect to AI provider: {str(e)}")
-
-    if not r.ok:
-        raise RuntimeError(f"AI provider HTTP {r.status_code}: {r.text[:700]}")
-
-    try:
-        res_json = r.json()
+        data = json.loads(content)
     except Exception:
-        raise RuntimeError(f"AI provider returned non-JSON response: {r.text[:500]}")
-
-    if "error" in res_json:
-        err_msg = res_json["error"].get("message") if isinstance(res_json["error"], dict) else str(res_json["error"])
-        raise RuntimeError(f"AI provider error: {err_msg}")
-
-    choices = res_json.get("choices", [])
-    if not choices:
-        raise RuntimeError(f"AI provider returned empty choices: {r.text[:500]}")
-
-    content = choices[0].get("message", {}).get("content", "")
-    data = extract_json(content)
-    if data is None or not isinstance(data, dict):
         data = {"answer": content, "actions": [], "suggestions": [], "context_used": []}
-
-    # Keep the frontend contract stable even if a model omits optional fields.
     data.setdefault("actions", [])
     data.setdefault("suggestions", [])
     data.setdefault("context_used", [])
     data.setdefault("answer", "I couldn't generate a concise answer from the available context.")
     return data
 
-
 @app.get("/health")
 def health():
-    key, base, model = get_config()
-    return {
-        "ok": True,
-        "configured": bool(key and base and model),
-        "model": model or None,
-        "base_url": base or None
-    }
-
+    return {"ok": True, "configured": bool(KEY and BASE and MODEL), "model": MODEL or None}
 
 @app.post("/api/copilot")
 def copilot(x: Req):
     try:
         return call(x.query, x.context, x.memory)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
+
+@app.post("/api/commitments")
+def commitments(x: CommitmentReq):
+    try:
+        # Keep enough context for semantic matching while limiting provider payload size.
+        def compact_mail(m, direction):
+            body = ((m.get("body") or {}).get("content") if isinstance(m.get("body"), dict) else None) or m.get("bodyPreview") or ""
+            return {
+                "id": m.get("id", ""),
+                "direction": direction,
+                "subject": m.get("subject", ""),
+                "from": m.get("from", {}),
+                "toRecipients": m.get("toRecipients", []),
+                "ccRecipients": m.get("ccRecipients", []),
+                "timestamp": m.get("timestamp") or m.get("sentDateTime") or m.get("receivedDateTime") or "",
+                "body": str(body)[:3500],
+                "webLink": m.get("webLink", ""),
+                "conversationId": m.get("conversationId", "")
+            }
+        sent = [compact_mail(m, "sent") for m in x.sent[:30]]
+        inbox = [compact_mail(m, "received") for m in x.inbox[:30]]
+        user_content = {
+            "NOW": x.now or datetime.now(timezone.utc).isoformat(),
+            "EMPLOYEE": x.employee,
+            "SENT_EMAILS": sent,
+            "INBOX_EMAILS": inbox
+        }
+        content = provider_call([
+            {"role": "system", "content": COMMITMENT_SYSTEM},
+            {"role": "user", "content": json.dumps(user_content, ensure_ascii=False)}
+        ], temperature=0.05)
+        data = json.loads(content)
+        data.setdefault("generatedAt", datetime.now(timezone.utc).isoformat())
+        data.setdefault("summary", {})
+        data.setdefault("commitments", [])
+        return data
+    except json.JSONDecodeError as e:
+        raise HTTPException(500, f"Commitment AI returned invalid JSON: {e}")
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+class DraftReq(BaseModel):
+    commitment: dict = Field(default_factory=dict)
+
+DRAFT_SYSTEM = """
+You draft concise professional workplace follow-up emails.
+Use only the supplied commitment. Do not invent project facts or deadlines.
+If a recipient email is present, use it. If not, return an empty `to`.
+Return JSON ONLY: {"to":"","subject":"","body":""}.
+The message should politely reference the commitment and ask for/communicate the next step.
+If the commitment is overdue, acknowledge the follow-up without inventing an excuse.
+"""
+
+@app.post("/api/commitments/draft")
+def commitment_draft(x: DraftReq):
+    try:
+        content = provider_call([
+            {"role": "system", "content": DRAFT_SYSTEM},
+            {"role": "user", "content": json.dumps(x.commitment, ensure_ascii=False)}
+        ], temperature=0.2)
+        data = json.loads(content)
+        return {
+            "to": data.get("to", ""),
+            "subject": data.get("subject", f"Follow-up: {x.commitment.get('title', 'Commitment')}"),
+            "body": data.get("body", "")
+        }
+    except json.JSONDecodeError as e:
+        raise HTTPException(500, f"Draft AI returned invalid JSON: {e}")
+    except Exception as e:
+        raise HTTPException(500, str(e))

@@ -4,11 +4,13 @@ import { loginRequest } from "./auth";
 import {
   getProfile,
   getMail,
+  getSentMail,
   getCalendar,
   sendMail,
   createDraft,
   markImportant,
-  flagMail
+  flagMail,
+  updateCalendarImportance
 } from "./graph";
 import { teams, tasks, rooms, buses, news, projects } from "./data";
 import { ai, BASE_SUGGESTIONS, dynamicFallback, fallback } from "./services/ai";
@@ -37,7 +39,12 @@ export function App() {
   const { instance, accounts } = useMsal();
   const account = accounts[0];
   const [mod, setMod] = useState("home");
-  const [d, setD] = useState({ p: null, m: [], c: [] });
+  const [d, setD] = useState({
+  p: null,
+  m: [],
+  sent: [],
+  c: []
+});
   const [msgs, setMsgs] = useState([]);
   const [q, setQ] = useState("");
   const [state, setState] = useState("idle");
@@ -83,25 +90,75 @@ export function App() {
     }
   }
 
-  async function load() {
-    try {
-      const t = await token();
-      const [p, m, c] = await Promise.all([getProfile(t), getMail(t), getCalendar(t)]);
-      if (mountedRef.current) setD({ p, m: m.value || [], c: c.value || [] });
-    } catch (e) {
-      setToast(`Graph data load failed: ${e.message}`);
+async function load() {
+  try {
+    const t = await token();
+ 
+    const [p, m, sent, c] = await Promise.all([
+      getProfile(t),
+      getMail(t),
+      getSentMail(t),
+      getCalendar(t)
+    ]);
+ 
+    console.log("========== GRAPH DEBUG ==========");
+    console.log("Inbox:", m?.value?.length);
+    console.log("Sent:", sent?.value?.length);
+    console.log("Calendar:", c?.value?.length);
+    console.log("First sent mail:", sent?.value?.[0]);
+    console.log("=================================");
+ 
+    if (mountedRef.current) {
+      setD({
+        p,
+        m: m.value || [],
+        sent: sent.value || [],
+        c: c.value || []
+      });
     }
+ 
+  } catch (e) {
+    console.error("GRAPH LOAD ERROR:", e);
+    setToast(`Graph data load failed: ${e.message}`);
   }
+}
+ 
+ 
 
-  const ctx = useMemo(() => ({
-    profile: d.p,
-    emails: d.m,
-    calendar: d.c,
-    teams: teams.map(x => ({ person: x[0], project: x[1], text: x[2], priority: x[3] })),
-    tasks: tasks.map(x => ({ title: x[0], project: x[1], due: x[2], priority: x[3], why: x[4] })),
-    projects,
-    workplace: { rooms, buses, news }
-  }), [d]);
+ const ctx = useMemo(() => ({
+  profile: d.p,
+ 
+  emails: d.m,
+ 
+  sentEmails: d.sent,
+ 
+  calendar: d.c,
+ 
+  teams: teams.map(x => ({
+    person: x[0],
+    project: x[1],
+    text: x[2],
+    priority: x[3]
+  })),
+ 
+  tasks: tasks.map(x => ({
+    title: x[0],
+    project: x[1],
+    due: x[2],
+    priority: x[3],
+    why: x[4]
+  })),
+ 
+  projects,
+ 
+  workplace: {
+    rooms,
+    buses,
+    news
+  }
+ 
+}), [d]);
+ 
 
   function saveMemory(question, answer) {
     const old = JSON.parse(localStorage.getItem("wdmem") || "[]");
@@ -259,6 +316,55 @@ export function App() {
     } catch (e) { setToast(`Draft save failed: ${e.message}`); }
   }
 
+  async function doCalendarImportant(event, important) {
+  try {
+    const t = await token();
+ 
+    await updateCalendarImportance(
+      t,
+      event.id,
+      important
+    );
+ 
+    setToast(
+      important
+        ? `"${event.subject || "Meeting"}" marked important.`
+        : `"${event.subject || "Meeting"}" removed from important.`
+    );
+ 
+    load();
+ 
+  } catch (e) {
+ 
+    setToast(
+      `Calendar update failed: ${e.message}`
+    );
+  }
+}
+
+function openMeetingMail(event) {
+ 
+  const organizer =
+    event.organizer?.emailAddress?.address || "";
+ 
+  const organizerName =
+    event.organizer?.emailAddress?.name ||
+    "there";
+ 
+  setModal({
+    mode: "meeting",
+    to: organizer,
+    cc: "",
+    subject: `Regarding: ${event.subject || "Meeting"}`,
+    body:
+      `Hi ${organizerName},\n\n` +
+      `I wanted to follow up regarding "${event.subject || "the meeting"}".\n\n` +
+      `Regards,\n${d.p?.displayName || "Employee"}`,
+    sourceMeeting: event
+  });
+}
+ 
+
   async function doFlag(mail) {
     try { await flagMail(await token(), mail.id); setToast("Mail flagged for follow-up."); load(); }
     catch (e) { setToast(`Flag failed: ${e.message}`); }
@@ -365,8 +471,42 @@ export function App() {
               important={doImportant}
             />
           )}
-          {mod === "calendar" && <Calendar c={d.c} ask={ask} />}
-          {mod === "commit" && <Commit ask={ask} />}
+          {mod === "calendar" && (
+  <Calendar
+    c={d.c}
+    ask={ask}
+    onMailOrganizer={openMeetingMail}
+    onJoinMeeting={(event) => {
+      const url =
+        event.onlineMeeting?.joinUrl ||
+        event.onlineMeeting?.joinWebUrl ||
+        event.webLink;
+ 
+      if (url) {
+        window.open(
+          url,
+          "_blank",
+          "noopener,noreferrer"
+        );
+      } else {
+        setToast(
+          "No online meeting link is available for this event."
+        );
+      }
+    }}
+    onImportant={doCalendarImportant}
+  />
+)}
+ 
+          {mod === "commit" && (
+  <Commit
+    ask={ask}
+    sent={d.sent}
+    inbox={d.m}
+    profile={d.p}
+    createDraft={doDraft}
+  />
+)}
           {mod === "projects" && <Projects />}
           {mod === "waiting" && <Waiting ask={ask} />}
           {mod === "workplace" && <Workplace />}
