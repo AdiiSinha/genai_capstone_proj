@@ -1,0 +1,91 @@
+# ==========================================
+# WORKDAY COPILOT - Git Ignore
+# ==========================================
+ 
+# ------------------------------
+# Environment / Secrets
+# ------------------------------
+.env
+.env.*
+!.env.example
+ 
+# ------------------------------
+# Python Backend
+# ------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+ 
+.venv/
+venv/
+env/
+ENV/
+ 
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+ 
+*.egg-info/
+dist/
+build/
+ 
+# Python coverage
+.coverage
+htmlcov/
+.pytest_cache/
+ 
+# ------------------------------
+# Node / React Frontend
+# ------------------------------
+node_modules/
+dist/
+build/
+.vite/
+ 
+# npm logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+ 
+# ------------------------------
+# VS Code
+# ------------------------------
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+ 
+# ------------------------------
+# OS Files
+# ------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+ 
+# ------------------------------
+# Temporary files
+# ------------------------------
+*.tmp
+*.temp
+*.log
+ 
+# ------------------------------
+# Local databases / generated data
+# ------------------------------
+*.db
+*.sqlite
+*.sqlite3
+ 
+# ------------------------------
+# IDE / Python tooling
+# ------------------------------
+.idea/
+*.iml
+ 
+# ------------------------------
+# Local certificates / keys
+# ------------------------------
+*.pem
+*.key
+*.p12
+*.pfx
