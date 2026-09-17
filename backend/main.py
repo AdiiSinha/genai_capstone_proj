@@ -1,20 +1,32 @@
 import os
 import json
+import re
+from pathlib import Path
 import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-load_dotenv()
-KEY = os.getenv("GENAI_API_KEY", "")
-BASE = os.getenv("GENAI_BASE_URL", "").rstrip("/")
-MODEL = os.getenv("GENAI_MODEL", "")
+# Resolve .env path relative to this file so it works regardless of CWD
+_ENV_PATH = Path(__file__).resolve().parent / ".env"
+
+# Initial load at startup
+load_dotenv(dotenv_path=_ENV_PATH, override=True)
 
 app = FastAPI(title="Workday Copilot AI")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
+    ],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]
@@ -67,9 +79,35 @@ Return JSON ONLY:
 """
 
 
+def get_config():
+    # Reload environment variables on the fly in case .env was modified after startup
+    load_dotenv(dotenv_path=_ENV_PATH, override=True)
+    key = os.getenv("GENAI_API_KEY", "").strip()
+    base = os.getenv("GENAI_BASE_URL", "").rstrip("/")
+    model = os.getenv("GENAI_MODEL", "").strip()
+    return key, base, model
+
+
+def extract_json(text: str):
+    # Remove markdown code blocks if present
+    cleaned = text.replace("```json", "").replace("```", "").strip()
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        # Fallback: search for first JSON object {...}
+        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except Exception:
+                pass
+    return None
+
+
 def call(q, c, memory):
-    if not (KEY and BASE and MODEL):
-        raise RuntimeError("AI backend not configured. Fill backend/.env.")
+    key, base, model = get_config()
+    if not (key and base and model):
+        raise RuntimeError("AI backend not configured. Please fill GENAI_API_KEY, GENAI_BASE_URL, and GENAI_MODEL in backend/.env.")
 
     compact = {
         "profile": c.get("profile"),
@@ -81,7 +119,7 @@ def call(q, c, memory):
         "workplace": c.get("workplace", {})
     }
     payload = {
-        "model": MODEL,
+        "model": model,
         "temperature": 0.18,
         "messages": [
             {"role": "system", "content": SYSTEM},
@@ -91,19 +129,35 @@ def call(q, c, memory):
              "\nREQUEST:\n" + q}
         ]
     }
-    r = requests.post(
-        BASE + "/chat/completions",
-        headers={"Authorization": "Bearer " + KEY, "Content-Type": "application/json"},
-        json=payload,
-        timeout=60
-    )
+    try:
+        r = requests.post(
+            f"{base}/chat/completions",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=60
+        )
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"Failed to connect to AI provider: {str(e)}")
+
     if not r.ok:
         raise RuntimeError(f"AI provider HTTP {r.status_code}: {r.text[:700]}")
 
-    content = r.json()["choices"][0]["message"]["content"].replace("```json", "").replace("```", "").strip()
     try:
-        data = json.loads(content)
+        res_json = r.json()
     except Exception:
+        raise RuntimeError(f"AI provider returned non-JSON response: {r.text[:500]}")
+
+    if "error" in res_json:
+        err_msg = res_json["error"].get("message") if isinstance(res_json["error"], dict) else str(res_json["error"])
+        raise RuntimeError(f"AI provider error: {err_msg}")
+
+    choices = res_json.get("choices", [])
+    if not choices:
+        raise RuntimeError(f"AI provider returned empty choices: {r.text[:500]}")
+
+    content = choices[0].get("message", {}).get("content", "")
+    data = extract_json(content)
+    if data is None or not isinstance(data, dict):
         data = {"answer": content, "actions": [], "suggestions": [], "context_used": []}
 
     # Keep the frontend contract stable even if a model omits optional fields.
@@ -113,13 +167,21 @@ def call(q, c, memory):
     data.setdefault("answer", "I couldn't generate a concise answer from the available context.")
     return data
 
+
 @app.get("/health")
 def health():
-    return {"ok": True, "configured": bool(KEY and BASE and MODEL), "model": MODEL or None}
+    key, base, model = get_config()
+    return {
+        "ok": True,
+        "configured": bool(key and base and model),
+        "model": model or None,
+        "base_url": base or None
+    }
+
 
 @app.post("/api/copilot")
 def copilot(x: Req):
     try:
         return call(x.query, x.context, x.memory)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
