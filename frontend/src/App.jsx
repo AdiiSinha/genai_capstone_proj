@@ -55,6 +55,7 @@ export function App() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [splash, setSplash] = useState(false);
   const [suggestions, setSuggestions] = useState(BASE_SUGGESTIONS);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [autoListen, setAutoListen] = useState(true);
   const [muted, setMuted] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -674,6 +675,7 @@ function openMeetingMail(event) {
         setProfileOpen={setProfileOpen}
         notificationCount={notifications.filter(item => !item.read).length}
         onToggleNotifications={() => setNotificationsOpen(v => !v)}
+        onToggleSidebar={() => setSidebarOpen(v => !v)}
       />
 
       <NotificationCenter
@@ -687,7 +689,7 @@ function openMeetingMail(event) {
         onAskAI={askAIForNotification}
       />
 
-      <div className="layout">
+      <div className={`layout ${sidebarOpen ? "" : "sidebarCollapsed"}`}>
         <Sidebar
           mod={mod}
           setMod={setMod}

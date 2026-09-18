@@ -58,26 +58,7 @@ export function Copilot({
           </p>
         </div>
 
-        <div className="voiceControl">
-          <button className={state === "listening" ? "listeningBtn" : ""} onClick={voice}>
-            {state === "listening" ? "◼ Stop listening" : "◉ Voice command"}
-          </button>
-          {state === "speaking" && <button onClick={stop}>■ Stop response</button>}
-          <button
-            className={`muteVoice ${muted ? "muted" : ""}`}
-            onClick={() => {
-              setMuted(v => !v);
-              if (!muted) stop();
-            }}
-            title={muted ? "Unmute AI response" : "Mute AI response"}
-          >
-            {muted ? "◌̸" : "🔇"} {muted ? "Unmute AI" : "Mute AI"}
-          </button>
-          <label>
-            <span className={autoListen ? "toggle on" : "toggle"} />
-            <input type="checkbox" checked={autoListen} onChange={() => {}} readOnly /> Auto-listen after response
-          </label>
-        </div>
+
       </div>
 
       <div className="chat">
