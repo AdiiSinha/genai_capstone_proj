@@ -12,7 +12,9 @@ export function Header({
   setMuted,
   autoListen,
   setAutoListen,
-  setProfileOpen
+  setProfileOpen,
+  notificationCount,
+  onToggleNotifications
 }) {
   return (
     <header>
@@ -27,6 +29,10 @@ export function Header({
         <span className="liveDot" /> LIVE CONTEXT · {d.m.length} MAILS · {d.c.length} EVENTS · TEAMS SYNTHETIC
       </div>
       <div className="top">
+        <button className="notificationBell" onClick={onToggleNotifications} title="Open notifications">
+          <span className="bellGlyph">🔔</span>
+          {notificationCount > 0 && <span className="notificationBadge">{notificationCount}</span>}
+        </button>
         <button className={`voiceTop ${state !== "idle" ? "active" : ""}`} onClick={toggleVoice} title={voiceLabel}>
           <span className="voiceGlyph">{state === "speaking" ? "◼" : state === "listening" ? "◉" : "✦"}</span>
           <small>{voiceLabel}</small>
