@@ -5,15 +5,28 @@ import { Title } from "../common/Title";
 import { Orb } from "../common/Orb";
 import { formatEventTime } from "../../calendarDate";
 
+function getIndiaGreeting() {
+  const hour = Number(new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    hour: "numeric",
+    hour12: false
+  }).format(new Date()));
+
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
+
 export function Home({ p, m, c, ask, set, suggestions }) {
   const u = tasks.filter(x => x[3] === "critical" || x[3] === "high").length;
+  const greeting = getIndiaGreeting();
 
   return (
     <div>
       <div className="hero">
         <div>
           <small>YOUR WORKDAY, AT A GLANCE</small>
-          <h2>Good afternoon, {p?.givenName || "there"}.</h2>
+          <h2>{greeting}, {p?.givenName || "there"}.</h2>
           <p>I've connected the latest context. Here's what matters right now.</p>
         </div>
         <span>● Context synced</span>
