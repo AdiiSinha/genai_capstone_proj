@@ -6,6 +6,7 @@ import {
   getMail,
   getSentMail,
   getCalendar,
+  markRead,
   sendMail,
   createDraft,
   markImportant,
@@ -624,6 +625,11 @@ function openMeetingMail(event) {
 }
  
 
+  async function doRead(mail) {
+    try { await markRead(await token(), mail.id); setToast("Email marked as read."); load(); }
+    catch (e) { setToast(`Read status update failed: ${e.message}`); }
+  }
+
   async function doFlag(mail) {
     try { await flagMail(await token(), mail.id); setToast("Mail flagged for follow-up."); load(); }
     catch (e) { setToast(`Flag failed: ${e.message}`); }
@@ -738,10 +744,13 @@ function openMeetingMail(event) {
           {mod === "mail" && (
             <Mail
               m={d.m}
+              sent={d.sent}
               ask={ask}
               reply={openReply}
               flag={doFlag}
               important={doImportant}
+              markRead={doRead}
+              projects={projects}
             />
           )}
           {mod === "calendar" && (

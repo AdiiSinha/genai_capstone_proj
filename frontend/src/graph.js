@@ -229,6 +229,22 @@ export const markImportant = (token, id) =>
       })
     }
   );
+
+/* =========================================================
+   MARK MAIL READ
+========================================================= */
+
+export const markRead = (token, id) =>
+  req(
+    token,
+    `/me/messages/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        isRead: true
+      })
+    }
+  );
  
  
 /* =========================================================
