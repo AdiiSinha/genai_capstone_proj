@@ -6,7 +6,8 @@ export const BASE_SUGGESTIONS = [
   "What should I do next?",
   "What am I waiting for?",
   "What have I promised?",
-  "Prepare me for my next meeting"
+  "Prepare me for my next meeting",
+  "Send leave mail to HR"
 ];
 
 export async function ai(payload) {

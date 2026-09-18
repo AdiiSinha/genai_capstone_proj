@@ -8,6 +8,7 @@ export function Modal({ x, close, send, draft }) {
   const [saving, setSaving] = useState(false);
 
   const isReply = x.mode === "reply" || x.label?.toLowerCase().includes("reply");
+  const isLeave = x.mode === "leave";
 
   async function save(mode) {
     setSaving(true);
@@ -19,15 +20,25 @@ export function Modal({ x, close, send, draft }) {
     }
   }
 
+  const modalTitle = isLeave
+    ? "Leave Application"
+    : isReply
+    ? "Reply to email"
+    : "Confirm email action";
+
+  const modalDesc = isLeave
+    ? "✦ AI-drafted leave application · Review and edit the letter, then approve to send directly to your HR."
+    : "✦ AI-assisted action · Review the recipient, CC, subject and message before saving or sending.";
+
   return (
     <div className="back">
       <div className="modal">
         <button className="modalClose" onClick={close}>
           ×
         </button>
-        <small>HUMAN APPROVAL</small>
-        <h2>{isReply ? "Reply to email" : "Confirm email action"}</h2>
-        <p>✦ AI-assisted action · Review the recipient, CC, subject and message before saving or sending.</p>
+        <small>{isLeave ? "AGENTIC LEAVE WORKFLOW · HUMAN APPROVAL" : "HUMAN APPROVAL"}</small>
+        <h2>{modalTitle}</h2>
+        <p>{modalDesc}</p>
         <div className="recipientRow">
           <label>
             Recipient

@@ -48,6 +48,68 @@ Return JSON ONLY with exactly these top-level keys:
 }
 
 For normal requests, keep answer concise and professional.
+
+==================================================
+LEAVE MAIL AGENTIC WORKFLOW
+==================================================
+
+When the user asks to:
+- "send a leave mail", "apply for leave", "send leave application",
+  "mail HR for leave", "send an email for leave", "request leave",
+  or any similar phrasing — with or without specific dates/reasons —
+
+Follow this agentic workflow:
+
+STEP 1 — Draft a complete, formal leave application letter using:
+  - Employee name: from context.profile.displayName (fallback: "Employee")
+  - Job title: from context.profile.jobTitle (if available)
+  - Dates: extracted from the user's request (use "the requested dates" if not specified)
+  - Reason: extracted from the user's request (use "personal reasons" if not specified)
+  - Recipient: always "nehacrazy@outlook.com" (this is the HR contact)
+
+STEP 2 — Return the draft as the FIRST element in the "actions" array using this EXACT schema:
+{
+  "label": "Review & Send Leave Mail",
+  "mode": "leave",
+  "to": "nehacrazy@outlook.com",
+  "cc": "",
+  "subject": "Leave Application – <date range or 'Requested Dates'>",
+  "body": "<Full professional leave letter — see format below>"
+}
+
+LETTER FORMAT (use this structure):
+---
+Subject: Leave Application – <From Date> to <To Date>
+
+Dear Neha,
+
+I hope this message finds you well.
+
+I am writing to formally request leave from <From Date> to <To Date> (inclusive) due to <reason>.
+
+During my absence, I will ensure all pending tasks are handed over and I will be reachable for any urgent matters if required.
+
+Kindly consider this request and let me know if any further information or documentation is needed.
+
+Thank you for your time and consideration.
+
+Warm regards,
+<Employee Name>
+<Job Title, if available>
+---
+
+STEP 3 — Set "answer" to a short, friendly confirmation such as:
+"I've drafted your leave application for <dates>. Please review and edit the email below before sending it to your HR."
+
+IMPORTANT RULES:
+- Always pre-fill ALL fields (to, subject, body). Never leave them empty.
+- The "to" field MUST always be "nehacrazy@outlook.com".
+- If the user did not specify dates, use placeholder text like "<From Date>" and "<To Date>" in the draft.
+- If the user did not specify a reason, use "personal reasons".
+- The user will review and approve in the UI before the mail is actually sent. This is human-in-the-loop. State this clearly in "answer".
+- Do NOT include any markdown formatting inside the email body — plain text only.
+
+==================================================
 """
 
 COMMITMENT_SYSTEM = """
