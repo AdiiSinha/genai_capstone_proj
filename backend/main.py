@@ -527,7 +527,6 @@ def call(q, c, memory):
 def health():
     return {"ok": True, "configured": bool(KEY and BASE and MODEL), "model": MODEL or None}
 
-<<<<<<< Updated upstream
 @app.post("/api/offices/nearby")
 def nearby_offices(x: OfficeSearchReq):
     """Retrieve same-state offices, falling back to all indexed states when needed."""
@@ -539,7 +538,6 @@ def nearby_offices(x: OfficeSearchReq):
     except OfficeRAGError as exc:
         logger.error("Office lookup failed: %s", exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-=======
 
 @app.post("/api/shuttle/search")
 def shuttle_search(x: ShuttleQuery):
@@ -553,7 +551,6 @@ def shuttle_search(x: ShuttleQuery):
         "answer": result["answer"],
         "counts": {key: len(value) for key, value in grouped.items()}
     }
->>>>>>> Stashed changes
 
 @app.post("/api/copilot")
 def copilot(x: Req):
