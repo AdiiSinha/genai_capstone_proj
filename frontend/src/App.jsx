@@ -38,7 +38,7 @@ import { ProfileCard } from "./components/modals/ProfileCard";
 export function App() {
   const { instance, accounts } = useMsal();
   const account = accounts[0];
-  const [mod, setMod] = useState("home");
+  const [mod, setMod] = useState("waiting");
   const [d, setD] = useState({
   p: null,
   m: [],

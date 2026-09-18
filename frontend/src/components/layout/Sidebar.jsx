@@ -11,7 +11,7 @@ export function Sidebar({ mod, setMod, mailCount = 0, calendarCount = 0, logout 
       <Nav a={mod} s={setMod} id="calendar" t="Calendar" i="◷" n={calendarCount} />
       <Nav a={mod} s={setMod} id="commit" t="Commitments" i="◎" />
       <Nav a={mod} s={setMod} id="projects" t="Projects" i="◇" />
-      <Nav a={mod} s={setMod} id="waiting" t="Waiting For" i="⌛" />
+      <Nav a={mod} s={setMod} id="waiting" t="Dependency Tracker" i="⌛" />
       <small className="lower">WORKPLACE</small>
       <Nav a={mod} s={setMod} id="workplace" t="Campus" i="▦" />
       <Nav a={mod} s={setMod} id="rooms" t="Meeting Rooms" i="▣" />
