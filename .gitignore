@@ -8,6 +8,7 @@
 .env
 .env.*
 !.env.example
+.env1
  
 # ------------------------------
 # Python Backend
@@ -20,6 +21,7 @@ __pycache__/
 venv/
 env/
 ENV/
+env1/
  
 .pytest_cache/
 .mypy_cache/

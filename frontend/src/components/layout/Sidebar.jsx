@@ -15,11 +15,6 @@ export function Sidebar({ mod, setMod, mailCount = 0, calendarCount = 0, logout 
       <small className="lower">WORKPLACE</small>
       <Nav a={mod} s={setMod} id="workplace" t="Campus" i="▦" />
       <Nav a={mod} s={setMod} id="rooms" t="Meeting Rooms" i="▣" />
-      <footer>
-        <span className="shield">✓</span> Identity protected
-        <br />
-        <button onClick={logout}>↪ Sign out</button>
-      </footer>
     </aside>
   );
 }

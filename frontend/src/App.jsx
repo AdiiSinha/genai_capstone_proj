@@ -525,7 +525,11 @@ function openMeetingMail(event) {
         />
       )}
       {profileOpen && (
-        <ProfileCard p={d.p} close={() => setProfileOpen(false)} />
+        <ProfileCard
+          p={d.p}
+          close={() => setProfileOpen(false)}
+          logout={logout}
+        />
       )}
     </div>
   );
