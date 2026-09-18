@@ -1,14 +1,18 @@
 import os
 import json
 import re
+import logging
 import requests
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from office_rag import OfficeRAGError, office_rag
 
 load_dotenv()
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+logger = logging.getLogger(__name__)
 KEY = os.getenv("GENAI_API_KEY", "")
 BASE = os.getenv("GENAI_BASE_URL", "").rstrip("/")
 MODEL = os.getenv("GENAI_MODEL", "")
@@ -33,6 +37,12 @@ class CommitmentReq(BaseModel):
     now: str = ""
     employee: dict = Field(default_factory=dict)
 
+class OfficeSearchReq(BaseModel):
+    query: str = Field(default="office", min_length=1, max_length=200)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    state: str | None = Field(default=None, max_length=100)
+    limit: int = Field(default=5, ge=1, le=20)
 
 SYSTEM = """
 You are Workday Copilot, a concise enterprise employee workday intelligence assistant.
@@ -444,6 +454,18 @@ def call(q, c, memory):
 @app.get("/health")
 def health():
     return {"ok": True, "configured": bool(KEY and BASE and MODEL), "model": MODEL or None}
+
+@app.post("/api/offices/nearby")
+def nearby_offices(x: OfficeSearchReq):
+    """Retrieve same-state offices, falling back to all indexed states when needed."""
+    try:
+        supplied_location = None
+        if x.latitude is not None and x.longitude is not None:
+            supplied_location = {"latitude": x.latitude, "longitude": x.longitude, "state": x.state or ""}
+        return office_rag.search(x.query, supplied_location, x.limit)
+    except OfficeRAGError as exc:
+        logger.error("Office lookup failed: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 @app.post("/api/copilot")
 def copilot(x: Req):

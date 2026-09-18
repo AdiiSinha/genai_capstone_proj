@@ -21,6 +21,7 @@ A local enterprise-style employee workday copilot prototype.
 - Automatic listening after an AI response (toggleable)
 - Employee profile card backed by Graph `/me`
 - Workplace pulse, meeting rooms, campus mobility and updates UI
+- PDF-backed office RAG lookup with OpenStreetMap location filtering and distance sorting
 
 ## Important permissions
 For the personal-account prototype, use Microsoft Graph **Delegated** permissions. The current frontend requests:
@@ -62,4 +63,23 @@ VITE_API_BASE_URL=http://localhost:8000
 
 ## Backend .env
 Keep your existing configured `GENAI_API_KEY`, `GENAI_BASE_URL`, and `GENAI_MODEL` values.
+For office lookup, also set `GENAI_EMBEDDING_MODEL` and optionally
+`OFFICE_LOCATIONS_PDF` (default: `backend/data/office_locations.pdf`) and
+`OFFICE_CHROMA_PATH` (default: `backend/data/chroma_offices`). OpenStreetMap Nominatim uses
+`OSM_NOMINATIM_URL` and requires a descriptive `OSM_USER_AGENT`. The PDF must contain one
+pipe-delimited row per office with this schema:
+
+```text
+Name | City | State | Latitude | Longitude | Address
+Capgemini Austin | Austin | Texas | 30.2672 | -97.7431 | 123 Main Street
+```
+
+Call `POST /api/offices/nearby` with `query`, `limit`, and optionally `latitude`, `longitude`,
+and `state`. The frontend obtains coordinates from browser geolocation, then the backend
+uses OpenStreetMap Nominatim to resolve the state. The response contains escaped HTML in `html`, structured `offices`, and
+`fallback_all_states`; state filtering happens before Haversine sorting, with an all-state
+fallback when no office matches.
+The embedding model must be enabled for your GenAI API key. A `403` from `/embeddings` is an
+identity-policy/platform permission issue, not a PDF or Chroma issue; ask the platform team
+for the exact supported embedding model and permission to call the embeddings endpoint.
 Do not commit secrets to Git.
