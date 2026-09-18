@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 import React, { useState, useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -41,6 +42,12 @@ const DEFAULT_OFFICES = [
     distance_km: 6.63
   }
 ];
+=======
+import React from "react";
+import { news } from "../../data";
+import { Title } from "../common/Title";
+import Shuttle from "./shuttle";
+>>>>>>> Stashed changes
 
 export function Workplace() {
   const [offices, setOffices] = useState(DEFAULT_OFFICES);
@@ -115,6 +122,7 @@ export function Workplace() {
           </div>
           <div class="wlPinTail"></div>
         </div>
+<<<<<<< Updated upstream
       `;
 
       const customIcon = L.divIcon({
@@ -264,6 +272,17 @@ export function Workplace() {
               {offices ? `${offices.length} Campuses` : "4 Campuses"}
             </span>
           </div>
+=======
+        <div>
+          {news.map(x => (
+            <article className="news" key={x[1]}>
+              <b>
+                {x[0]} {x[1]}
+              </b>
+              <p>{x[2]}</p>
+            </article>
+          ))}
+>>>>>>> Stashed changes
         </div>
       </header>
 
@@ -410,6 +429,9 @@ export function Workplace() {
             </a>
           </div>
         </aside>
+      </div>
+      <div className="campusMobilityBelowMap">
+        <Shuttle compact={false} />
       </div>
     </div>
   );

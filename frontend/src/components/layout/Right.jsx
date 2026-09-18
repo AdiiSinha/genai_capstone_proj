@@ -1,5 +1,6 @@
 import React from "react";
-import { rooms, news, buses } from "../../data";
+import { rooms, news } from "../../data";
+import Shuttle from "../modules/shuttle";
 
 export function Right({ set }) {
   return (
@@ -34,23 +35,7 @@ export function Right({ set }) {
         ))}
       </section>
       <section>
-        <b>
-          CAMPUS MOBILITY <em>LIVE MAP</em>
-        </b>
-        <div className="minimap">
-          <i>HQ</i>
-          <i>GATE 2</i>
-          <span>●</span>
-        </div>
-        {buses.map(x => (
-          <div className="rrow" key={x[0]}>
-            <span>
-              <strong>▰ {x[0]}</strong>
-              <small>{x[1]}</small>
-            </span>
-            <em>{x[3]}</em>
-          </div>
-        ))}
+        <Shuttle compact />
       </section>
     </div>
   );

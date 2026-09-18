@@ -44,6 +44,78 @@ class OfficeSearchReq(BaseModel):
     state: str | None = Field(default=None, max_length=100)
     limit: int = Field(default=5, ge=1, le=20)
 
+class ShuttleQuery(BaseModel):
+    query: str = ""
+    minutes_ahead: int = Field(default=30, ge=5, le=180)
+
+
+SHUTTLE_KNOWLEDGE = [
+    {"route": "Shuttle A", "direction": "Whitefield to Campus", "stops": ["Main Gate", "Library", "Tech Block"], "gate": "Gate 1", "offset": 6, "frequency": "Every 20 minutes", "status": "running"},
+    {"route": "Shuttle C", "direction": "Bellandur to Campus", "stops": ["Main Gate", "Tech Block", "East Loop"], "gate": "Gate 3", "offset": 4, "frequency": "Every 30 minutes", "status": "running"},
+    {"route": "Shuttle F", "direction": "Main Gate to Library", "stops": ["Main Gate", "Library"], "gate": "Main Gate", "offset": 0, "frequency": "Every 10 minutes", "status": "running"},
+    {"route": "Shuttle G", "direction": "Main Gate to Tech Block", "stops": ["Main Gate", "Tech Block"], "gate": "Main Gate", "offset": 2, "frequency": "Every 10 minutes", "status": "running"},
+    {"route": "Buggy 03", "direction": "Campus loop", "stops": ["Main Gate", "Library", "Tech Block", "East Loop"], "gate": "Main Lobby", "offset": -2, "frequency": "Every 10 minutes", "status": "running"}
+]
+
+
+def retrieve_shuttles(query: str, minutes_ahead: int):
+    """Retrieve relevant mock transport records and classify them by ETA."""
+    now = datetime.now().astimezone()
+    query_lower = query.lower()
+    terms = set(re.findall(r"[a-z0-9]+", query_lower))
+    asks_running = any(word in query_lower for word in ("running", "operating", "active"))
+    destination_terms = {
+        stop.lower() for record in SHUTTLE_KNOWLEDGE for stop in record["stops"]
+        if stop.lower() in query_lower
+    }
+    matches = []
+
+    for record in SHUTTLE_KNOWLEDGE:
+        searchable = " ".join([
+            record["route"], record["direction"], record["gate"], record["frequency"],
+            " ".join(record["stops"]), record["status"]
+        ]).lower()
+        record_terms = set(re.findall(r"[a-z0-9]+", searchable))
+        relevance = len(terms & record_terms) if terms else 1
+        has_destination = bool(destination_terms & {stop.lower() for stop in record["stops"]})
+        if destination_terms and not has_destination:
+            continue
+        if asks_running and record["status"] != "running":
+            continue
+        scheduled_minutes = record["offset"]
+        status = "just_left" if scheduled_minutes < 0 else "leaving_soon" if scheduled_minutes == 0 else "upcoming"
+        departure = now + timedelta(minutes=scheduled_minutes)
+        matches.append({
+            **record,
+            "departureAt": departure.isoformat(),
+            "scheduledAt": (now + timedelta(minutes=scheduled_minutes)).isoformat(),
+            "minutes": scheduled_minutes,
+            "scheduledMinutes": scheduled_minutes,
+            "status": status,
+            "eta": f"{abs(scheduled_minutes)} min ago" if scheduled_minutes < 0 else "Boarding now" if scheduled_minutes == 0 else f"{scheduled_minutes} min",
+            "serviceStatus": record["status"],
+            "stops": record["stops"],
+            "relevance": relevance
+        })
+
+    matches.sort(key=lambda item: (-item["relevance"], item["minutes"]))
+    selected = [item for item in matches if item["minutes"] <= minutes_ahead or item["status"] == "just_left"]
+    grouped = {"upcoming": [], "leaving_soon": [], "just_left": []}
+    for item in selected:
+        grouped[item["status"]].append(item)
+    answer = "No matching shuttle was found."
+    if matches:
+        if destination_terms:
+            next_bus = next((item for item in matches if item["status"] != "just_left"), matches[0])
+            answer = f"The next shuttle serving {next(iter(destination_terms)).title()} is {next_bus['route']} in {next_bus['eta']}."
+        elif asks_running:
+            answer = f"{len(matches)} shuttle(s) are currently running."
+        else:
+            next_bus = next((item for item in matches if item["status"] != "just_left"), matches[0])
+            answer = f"The next shuttle is {next_bus['route']} in {next_bus['eta']}."
+    return {"groups": grouped, "answer": answer}
+
+
 SYSTEM = """
 You are Workday Copilot, a concise enterprise employee workday intelligence assistant.
 Use ONLY the supplied authorized context. Never invent people, emails, deadlines, projects,
@@ -455,6 +527,7 @@ def call(q, c, memory):
 def health():
     return {"ok": True, "configured": bool(KEY and BASE and MODEL), "model": MODEL or None}
 
+<<<<<<< Updated upstream
 @app.post("/api/offices/nearby")
 def nearby_offices(x: OfficeSearchReq):
     """Retrieve same-state offices, falling back to all indexed states when needed."""
@@ -466,6 +539,21 @@ def nearby_offices(x: OfficeSearchReq):
     except OfficeRAGError as exc:
         logger.error("Office lookup failed: %s", exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+=======
+
+@app.post("/api/shuttle/search")
+def shuttle_search(x: ShuttleQuery):
+    result = retrieve_shuttles(x.query, x.minutes_ahead)
+    grouped = result["groups"]
+    return {
+        "query": x.query,
+        "generatedAt": datetime.now().astimezone().isoformat(),
+        "source": "mock campus transport knowledge base",
+        "results": grouped,
+        "answer": result["answer"],
+        "counts": {key: len(value) for key, value in grouped.items()}
+    }
+>>>>>>> Stashed changes
 
 @app.post("/api/copilot")
 def copilot(x: Req):

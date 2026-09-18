@@ -3719,6 +3719,11 @@ main::-webkit-scrollbar-thumb:hover,
   }
 }
 
+.shuttlePanel{display:flex;flex-direction:column;gap:10px;margin-top:10px}.shuttlePanel h4{margin:0 0 4px;color:#dff6ff;font-size:10px;letter-spacing:1.1px}.shuttleSection{border-top:1px solid #75bfff0d;padding-top:10px}.shuttleRows{display:flex;flex-direction:column;gap:8px}.shuttleRow{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #75bfff08}.shuttleRow:last-child{border-bottom:0}.shuttleMeta{display:flex;flex-direction:column;gap:2px}.shuttleMeta strong{font-size:10px;color:#eef9ff}.shuttleMeta small{font-size:8px;color:#6d859b}.shuttleState{font-size:8px;font-weight:800;letter-spacing:.8px;padding:4px 6px;border-radius:999px;text-transform:uppercase}.shuttleState.upcoming{background:#38eaff12;color:#7de4ff;border:1px solid #38eaff33}.shuttleState.leaving_soon{background:#ffb84d12;color:#ffcc71;border:1px solid #ffb84d33}.shuttleState.just_left{background:#ff617512;color:#ff8b9d;border:1px solid #ff617533}.shuttleCompact{display:flex;flex-direction:column;gap:10px}.shuttleCompact .shuttleSection{padding-top:0;border-top:none}.shuttleCompact .shuttleRow{padding:9px 0}
+.shuttleSearch{display:flex;gap:8px}.shuttleSearch input{flex:1;min-width:0;background:#061426;color:#eaf7ff;border:1px solid #75bfff1d;border-radius:7px;padding:9px;font-size:10px;outline:0}.shuttleSearch button{background:#38eaff0d;color:var(--cyan);border:1px solid #38eaff44;border-radius:7px;padding:0 10px;font-size:9px}.shuttleSource{color:#66829b;font-size:8px;margin-top:5px}.shuttleDeparture{color:#91b6ca!important;font-size:8px!important;margin-top:3px}
+.shuttleAnswer{margin:0;padding:10px;border-left:2px solid var(--cyan);background:#38eaff08;color:#b9d6e5;font-size:10px;line-height:1.45}
+.campusMobilityBelowMap{margin-top:13px}.campusMobilityBelowMap .shuttlePanel{margin-top:0}
+
 
 /* =========================================================
    WORKDAY COPILOT — ADVANCED CALENDAR UI
