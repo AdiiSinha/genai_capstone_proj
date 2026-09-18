@@ -63,6 +63,7 @@ export function App() {
   const [notifications, setNotifications] = useState([]);
   const [drafts, setDrafts] = useState(() => JSON.parse(localStorage.getItem("wdDrafts") || "[]"));
   const recognitionRef = useRef(null);
+  const requestRef = useRef(0);
   const autoTimerRef = useRef(null);
   const calendarPollRef = useRef(null);
   const commitmentPollRef = useRef(null);
@@ -435,6 +436,7 @@ async function load() {
 
   async function ask(text) {
     if (!text.trim()) return;
+    const requestId = ++requestRef.current;
     stopRecognition();
     clearTimeout(autoTimerRef.current);
     setQ("");
@@ -444,12 +446,14 @@ async function load() {
     try {
       const memory = JSON.parse(localStorage.getItem("wdmem") || "[]");
       const z = await ai({ query: text, context: ctx, memory });
+      if (requestId !== requestRef.current) return;
       const answer = String(z.answer || "").trim();
       setMsgs(x => [...x, { r: "a", t: answer, actions: z.actions || [] }]);
       saveMemory(text, answer);
       setDynamicSuggestions(z.suggestions);
       speak(answer, true);
     } catch (e) {
+      if (requestId !== requestRef.current) return;
       const answer = fallback(text, d, teams.length);
       setMsgs(x => [...x, { r: "a", t: answer, actions: [] }]);
       saveMemory(text, answer);
@@ -461,13 +465,17 @@ async function load() {
 
   function speak(text, continueListening = false) {
     if (muted) {
+      setState("idle");
       if (continueListening && autoListen) {
         clearTimeout(autoTimerRef.current);
         autoTimerRef.current = setTimeout(() => startListening(true), 2300);
       }
       return;
     }
-    if (!window.speechSynthesis) return;
+    if (!window.speechSynthesis) {
+      setState("idle");
+      return;
+    }
     clearTimeout(autoTimerRef.current);
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(cleanSpeech(text));
@@ -492,6 +500,7 @@ async function load() {
   }
 
   function stopSpeaking() {
+    requestRef.current += 1;
     window.speechSynthesis?.cancel();
     setState("idle");
   }
