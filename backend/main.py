@@ -1,7 +1,8 @@
 import os
 import json
+import re
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,6 +33,7 @@ class CommitmentReq(BaseModel):
     now: str = ""
     employee: dict = Field(default_factory=dict)
 
+
 SYSTEM = """
 You are Workday Copilot, a concise enterprise employee workday intelligence assistant.
 Use ONLY the supplied authorized context. Never invent people, emails, deadlines, projects,
@@ -49,81 +51,291 @@ For normal requests, keep answer concise and professional.
 """
 
 COMMITMENT_SYSTEM = """
-You are the Commitment Intelligence engine inside an enterprise employee copilot.
-The supplied SENT emails were written by the signed-in employee. The supplied INBOX emails
-were received by that employee. Analyze them semantically, not with keyword matching alone.
-
-A commitment is a promise, planned action, or explicit intention made BY THE SIGNED-IN EMPLOYEE.
-Examples include: "I'll send it by Friday", "I'll check this and get back to you",
-"I'll share the report tomorrow", "Let me take this", "I'll handle the deployment",
-"I can send the details later today".
-
-Do NOT create a commitment merely because someone asked the employee to do something.
-Do NOT invent a deadline when none is stated. "soon" remains no exact deadline.
-Understand natural-language deadlines such as today, tomorrow, Friday, EOD, next week,
-and deadlines relative to the email timestamp. Use the supplied current timestamp.
-
-Completion detection:
-- A commitment is completed only when a later supplied email contains credible evidence
-  that the employee fulfilled the promised action.
-- Prefer evidence from the employee's later SENT email, but an INBOX reply can corroborate
-  completion (for example, "Thanks for sending the report").
-- Never mark a commitment complete merely because time passed.
-- If evidence is ambiguous, keep it pending and explain why.
-
-Deduplicate multiple emails that clearly represent the same promise. Preserve the earliest
-promise as the source and include later related evidence.
-
-For every commitment return:
+You are Workday Copilot's Commitment Intelligence engine.
+ 
+Analyze the supplied SENT_EMAILS and INBOX_EMAILS and identify commitments
+made BY THE EMPLOYEE.
+ 
+The employee is the person represented by EMPLOYEE.
+ 
+==================================================
+WHAT COUNTS AS A COMMITMENT
+==================================================
+ 
+Detect first-person promises and follow-ups such as:
+ 
+"I'll send you tomorrow."
+"I will send the document tomorrow."
+"I'll send the report."
+"I'll get back to you."
+"I'll get back to you by EOD."
+"I'll share the document by Friday."
+"I'll review this and let you know."
+"I'll check and update you."
+"I'll follow up with them."
+"I'll take care of this."
+"I will prepare the presentation."
+"I'll send the details soon."
+"Let me get back to you."
+"I can send this by Monday."
+"I'll have this ready tomorrow."
+ 
+A commitment does NOT need to contain the word:
+commitment, task, action, deadline, promise.
+ 
+Natural workplace language counts.
+ 
+IMPORTANT:
+Even "I'll get back to you" without a deadline IS a commitment.
+Set its status to "no_deadline".
+ 
+==================================================
+WHOSE COMMITMENT?
+==================================================
+ 
+SENT_EMAILS are the primary source.
+ 
+A promise made by the employee in SENT_EMAILS = employee commitment.
+ 
+A promise made by somebody else in INBOX_EMAILS = NOT employee commitment.
+ 
+Example:
+ 
+Employee sends:
+"I'll send the report tomorrow."
+ 
+→ COMMITMENT.
+ 
+Someone sends:
+"I'll send you the report tomorrow."
+ 
+→ NOT the employee's commitment.
+ 
+==================================================
+COMPLETION
+==================================================
+ 
+Use INBOX_EMAILS and later SENT_EMAILS to look for evidence that an
+employee commitment was completed.
+ 
+Do NOT assume completion just because the deadline passed.
+ 
+Only mark completed when there is reasonable evidence.
+ 
+==================================================
+DEADLINES
+==================================================
+ 
+Understand:
+ 
+today
+tomorrow
+tonight
+this afternoon
+this evening
+EOD
+end of day
+soon
+shortly
+Monday
+Friday
+next week
+by 5 PM
+within two days
+ 
+Use NOW to interpret relative dates.
+ 
+If there is no explicit deadline:
+ 
+status = "no_deadline"
+dueAt = ""
+dueLabel = "No deadline"
+ 
+Do not invent dates.
+ 
+==================================================
+STATUS
+==================================================
+ 
+Use exactly one:
+ 
+"active"
+"due_today"
+"due_soon"
+"overdue"
+"completed"
+"no_deadline"
+ 
+==================================================
+PRIORITY
+==================================================
+ 
+Use:
+ 
+"high"
+"medium"
+"low"
+ 
+Use high only for clearly urgent/time-sensitive commitments.
+ 
+==================================================
+OUTPUT
+==================================================
+ 
+Return VALID JSON ONLY.
+ 
+Use exactly this structure:
+ 
 {
-  "id": "stable local id",
-  "title": "short action title",
-  "action": "what the employee promised to do",
-  "recipientName": "name or empty string",
-  "recipientEmail": "email or empty string",
-  "project": "project/topic or empty string",
-  "promisedAt": "ISO timestamp",
-  "dueAt": "ISO timestamp or null",
-  "dueLabel": "human-readable deadline or 'No deadline'",
-  "originalQuote": "exact short sentence from source email",
-  "sourceId": "Graph message id",
-  "sourceSubject": "subject",
-  "sourceWebLink": "Graph webLink or empty string",
-  "status": "completed|overdue|due_today|due_soon|pending|no_deadline",
-  "priority": "high|medium|low",
-  "confidence": 0,
-  "confidenceReason": "brief evidence-based reason",
-  "risk": "high|medium|low|none",
-  "riskReason": "brief reason",
-  "completionDetected": true,
-  "completionAt": "ISO timestamp or null",
-  "completionEvidence": "exact short evidence sentence or empty string",
-  "completionSubject": "subject or empty string",
-  "completionWebLink": "webLink or empty string",
-  "relatedEmails": [
-    {"id":"...","direction":"sent|received","subject":"...","timestamp":"...","webLink":"..."}
+  "generatedAt": "",
+  "summary": {
+    "active": 0,
+    "dueToday": 0,
+    "overdue": 0,
+    "completed": 0,
+    "noDeadline": 0
+  },
+  "commitments": [
+    {
+      "id": "",
+      "title": "",
+      "action": "",
+      "status": "active",
+      "confidence": 95,
+      "confidenceReason": "",
+      "priority": "medium",
+ 
+      "recipientName": "",
+      "recipientEmail": "",
+ 
+      "project": "",
+ 
+      "dueAt": "",
+      "dueLabel": "",
+ 
+      "promisedAt": "",
+ 
+      "originalQuote": "",
+ 
+      "sourceId": "",
+      "sourceSubject": "",
+      "sourceWebLink": "",
+ 
+      "completionDetected": false,
+      "completionEvidence": "",
+      "completionSubject": "",
+      "completionAt": "",
+ 
+      "risk": "none",
+      "riskReason": ""
+    }
   ]
 }
-
-Rules:
-- confidence is 0-100.
-- status is based on now, dueAt, and verified completion evidence.
-- A due date without a time should use a reasonable end-of-day interpretation, but dueLabel
-  must preserve the wording actually stated.
-- If no deadline exists, dueAt must be null.
-- recipient should come from toRecipients when available; never guess a recipient.
-- project/topic should only be populated when supported by subject/content.
-- originalQuote must be a quote from supplied email content, not generated prose.
-- Return at most 30 distinct commitments, ordered: overdue, due today, due soon, pending,
-  no deadline, completed.
-
-Return JSON ONLY:
-{
-  "generatedAt": "ISO timestamp",
-  "summary": {"active":0,"dueToday":0,"overdue":0,"completed":0,"noDeadline":0},
-  "commitments": []
-}
+ 
+==================================================
+FIELD RULES
+==================================================
+ 
+id:
+Create a stable unique ID based on the source email and commitment.
+ 
+title:
+Short human-readable title.
+ 
+Examples:
+ 
+"I'll send the report tomorrow."
+→ "Send the report"
+ 
+"I'll get back to you."
+→ "Get back to recipient"
+ 
+"I'll review this and let you know."
+→ "Review and respond"
+ 
+action:
+A short description of the actual promised action.
+ 
+confidence:
+0-100 confidence that this is a real employee commitment.
+ 
+originalQuote:
+Copy the exact relevant commitment sentence from the email.
+Do not invent it.
+ 
+sourceId:
+Must be the actual source email id.
+ 
+sourceSubject:
+Must be the actual source email subject.
+ 
+sourceWebLink:
+Use the source email webLink if available.
+ 
+promisedAt:
+Use the source email timestamp.
+ 
+recipientName:
+Use the recipient's name if available.
+ 
+recipientEmail:
+Use the recipient's email if available.
+ 
+project:
+Only use a project explicitly supported by the email.
+Otherwise use "".
+ 
+completionEvidence:
+Only provide this when completionDetected is true.
+ 
+risk:
+Use:
+"none"
+"low"
+"medium"
+"high"
+ 
+Do not invent risk.
+ 
+==================================================
+IMPORTANT EXTRACTION RULE
+==================================================
+ 
+DO NOT return an empty commitments array merely because the email is short.
+ 
+For example:
+ 
+"I'll send you tomorrow"
+ 
+MUST produce a commitment.
+ 
+"I'll get back to you"
+ 
+MUST produce a commitment.
+ 
+"I'll send the doc soon"
+ 
+MUST produce a commitment.
+ 
+If the supplied SENT_EMAILS contain a first-person promise, detect it.
+ 
+Do not create commitments from:
+ 
+"Thanks"
+"Okay"
+"Noted"
+"Received"
+"How are you?"
+"Can you send me..."
+"Please send..."
+"Are you available?"
+ 
+Those are not employee commitments unless the employee explicitly promises
+to perform an action.
+ 
+Return JSON only. No markdown. No explanation.
 """
+ 
 
 def provider_call(messages, temperature=0.1):
     if not (KEY and BASE and MODEL):
@@ -178,12 +390,340 @@ def copilot(x: Req):
     except Exception as e:
         raise HTTPException(500, str(e))
 
+
+def build_fallback_commitments(sent, now):
+    """
+    Deterministic fallback for obvious first-person commitments.
+ 
+    This is used only when the AI returns no commitments.
+    It does NOT replace AI analysis.
+    """
+ 
+    patterns = [
+        r"\bi['’]ll\b",
+        r"\bi\s+will\b",
+        r"\bi\s+can\b",
+        r"\bi\s+plan\s+to\b",
+        r"\bi\s+intend\s+to\b",
+        r"\blet\s+me\b"
+    ]
+ 
+    commitment_items = []
+ 
+    for mail in sent:
+ 
+        body = str(mail.get("body") or "").strip()
+ 
+        if not body:
+            continue
+ 
+        # Split email into sentences.
+        sentences = re.split(r"(?<=[.!?])\s+|\n+", body)
+ 
+        for sentence in sentences:
+ 
+            sentence = sentence.strip()
+ 
+            if not sentence:
+                continue
+ 
+            # Ignore obvious non-commitment phrases.
+            lower = sentence.lower()
+ 
+            if lower in {
+                "thanks",
+                "thank you",
+                "okay",
+                "ok",
+                "noted",
+                "received"
+            }:
+                continue
+ 
+            matched = False
+ 
+            for pattern in patterns:
+                if re.search(pattern, sentence, re.IGNORECASE):
+                    matched = True
+                    break
+ 
+            if not matched:
+                continue
+ 
+            # ---------------------------------------
+            # Determine action/title
+            # ---------------------------------------
+ 
+            clean_sentence = sentence.strip()
+ 
+            if re.search(r"\bsend\b|\bsent\b", lower):
+                title = "Send the requested item"
+                action = "Send the requested item"
+ 
+            elif "get back" in lower:
+                title = "Get back to recipient"
+                action = "Get back to recipient"
+ 
+            elif "review" in lower:
+                title = "Review and respond"
+                action = "Review and respond"
+ 
+            elif "check" in lower:
+                title = "Check and provide an update"
+                action = "Check and provide an update"
+ 
+            elif "follow up" in lower:
+                title = "Follow up"
+                action = "Follow up"
+ 
+            elif "share" in lower:
+                title = "Share the requested item"
+                action = "Share the requested item"
+ 
+            elif "prepare" in lower:
+                title = "Prepare the requested item"
+                action = "Prepare the requested item"
+ 
+            elif "update" in lower:
+                title = "Provide an update"
+                action = "Provide an update"
+ 
+            else:
+                title = "Follow up on promised action"
+                action = clean_sentence
+ 
+            # ---------------------------------------
+            # Deadline detection
+            # ---------------------------------------
+ 
+            status = "no_deadline"
+            due_label = "No deadline"
+            due_at = ""
+ 
+            source_time = mail.get("timestamp") or now
+            try:
+                source_date = datetime.fromisoformat(
+                    str(source_time).replace("Z", "+00:00")
+                )
+            except ValueError:
+                source_date = datetime.now(timezone.utc)
+
+            if source_date.tzinfo is None:
+                source_date = source_date.replace(tzinfo=timezone.utc)
+
+            due_date = None
+
+            if re.search(r"\btomorrow\b", lower):
+                due_date = source_date + timedelta(days=1)
+ 
+                status = "due_soon"
+                due_label = "Tomorrow"
+ 
+            elif re.search(
+                r"\btoday\b|\beod\b|\bend of day\b|\btonight\b",
+                lower
+            ):
+                due_date = source_date
+                status = "due_today"
+                due_label = "Today"
+ 
+            elif re.search(
+                r"\bsoon\b|\bshortly\b|\bthis week\b",
+                lower
+            ):
+ 
+                status = "due_soon"
+                due_label = "Soon"
+
+            if due_date:
+                due_at = due_date.astimezone(timezone.utc).isoformat()
+ 
+            # ---------------------------------------
+            # Recipient
+            # ---------------------------------------
+ 
+            recipient_name = ""
+            recipient_email = ""
+ 
+            recipients = mail.get("toRecipients") or []
+ 
+            if recipients:
+ 
+                first = recipients[0] or {}
+                email_data = first.get("emailAddress") or {}
+ 
+                recipient_name = email_data.get("name") or ""
+                recipient_email = email_data.get("address") or ""
+ 
+            # ---------------------------------------
+            # Stable ID
+            # ---------------------------------------
+ 
+            source_id = mail.get("id") or ""
+ 
+            commitment_id = (
+                "fallback-"
+                + source_id[-20:]
+                + "-"
+                + str(len(commitment_items) + 1)
+            )
+ 
+            commitment_items.append({
+                "id": commitment_id,
+ 
+                "title": title,
+ 
+                "action": action,
+ 
+                "status": status,
+ 
+                "confidence": 90,
+ 
+                "confidenceReason":
+                    "A first-person promise/action phrase was detected "
+                    "directly in the employee's sent email.",
+ 
+                "priority": "medium",
+ 
+                "recipientName": recipient_name,
+ 
+                "recipientEmail": recipient_email,
+ 
+                "project": "",
+ 
+                "dueAt": due_at,
+ 
+                "dueLabel": due_label,
+ 
+                "promisedAt": mail.get("timestamp") or "",
+ 
+                "originalQuote": clean_sentence,
+ 
+                "sourceId": source_id,
+ 
+                "sourceSubject":
+                    mail.get("subject") or "(No subject)",
+ 
+                "sourceWebLink":
+                    mail.get("webLink") or "",
+ 
+                "completionDetected": False,
+ 
+                "completionEvidence": "",
+ 
+                "completionSubject": "",
+ 
+                "completionAt": "",
+ 
+                "risk": "none",
+ 
+                "riskReason": ""
+            })
+ 
+    return commitment_items
+
+
+COMMITMENT_DEFAULTS = {
+    "id": "",
+    "title": "Follow up on promised action",
+    "action": "Follow up on promised action",
+    "status": "pending",
+    "confidence": 0,
+    "confidenceReason": "",
+    "priority": "medium",
+    "recipientName": "",
+    "recipientEmail": "",
+    "project": "",
+    "dueAt": "",
+    "dueLabel": "No deadline",
+    "promisedAt": "",
+    "originalQuote": "",
+    "sourceId": "",
+    "sourceSubject": "(No subject)",
+    "sourceWebLink": "",
+    "completionDetected": False,
+    "completionEvidence": "",
+    "completionSubject": "",
+    "completionAt": "",
+    "risk": "none",
+    "riskReason": ""
+}
+
+
+def normalize_commitments(value):
+    if not isinstance(value, list):
+        return []
+
+    normalized = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        commitment = {**COMMITMENT_DEFAULTS, **item}
+        commitment["id"] = str(commitment["id"] or "commitment-" + str(len(normalized) + 1))
+        try:
+            confidence = int(commitment["confidence"] or 0)
+        except (TypeError, ValueError):
+            confidence = 0
+        commitment["confidence"] = max(0, min(100, confidence))
+        normalized.append(commitment)
+    return normalized
+
+
+def parse_commitment_response(content):
+    text = str(content or "").strip()
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE)
+    try:
+        value = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        return {"commitments": []}
+    return value if isinstance(value, dict) else {"commitments": []}
+
+
+def rebuild_commitment_summary(commitments):
+    summary = {"active": 0, "dueToday": 0, "overdue": 0, "completed": 0, "noDeadline": 0}
+    for commitment in commitments:
+        status = commitment.get("status")
+        if status == "completed":
+            summary["completed"] += 1
+        elif status == "due_today":
+            summary["dueToday"] += 1
+            summary["active"] += 1
+        elif status == "overdue":
+            summary["overdue"] += 1
+            summary["active"] += 1
+        elif status == "no_deadline":
+            summary["noDeadline"] += 1
+            summary["active"] += 1
+        else:
+            summary["active"] += 1
+    return summary
+ 
+
 @app.post("/api/commitments")
 def commitments(x: CommitmentReq):
     try:
-        # Keep enough context for semantic matching while limiting provider payload size.
+        print("\n")
+        print("========================================")
+        print("       COMMITMENT API DEBUG START")
+        print("========================================")
+ 
+        print("Employee:", x.employee)
+        print("NOW:", x.now)
+ 
+        print("Incoming sent emails:", len(x.sent or []))
+        print("Incoming inbox emails:", len(x.inbox or []))
+ 
+        # ----------------------------------------
+        # Compact email data
+        # ----------------------------------------
         def compact_mail(m, direction):
-            body = ((m.get("body") or {}).get("content") if isinstance(m.get("body"), dict) else None) or m.get("bodyPreview") or ""
+            raw_body = m.get("body")
+            body = (
+                raw_body.get("content", "")
+                if isinstance(raw_body, dict)
+                else raw_body or m.get("bodyPreview") or ""
+            )
+ 
             return {
                 "id": m.get("id", ""),
                 "direction": direction,
@@ -191,32 +731,299 @@ def commitments(x: CommitmentReq):
                 "from": m.get("from", {}),
                 "toRecipients": m.get("toRecipients", []),
                 "ccRecipients": m.get("ccRecipients", []),
-                "timestamp": m.get("timestamp") or m.get("sentDateTime") or m.get("receivedDateTime") or "",
+                "timestamp": (
+                    m.get("timestamp")
+                    or m.get("sentDateTime")
+                    or m.get("receivedDateTime")
+                    or ""
+                ),
                 "body": str(body)[:3500],
                 "webLink": m.get("webLink", ""),
                 "conversationId": m.get("conversationId", "")
             }
-        sent = [compact_mail(m, "sent") for m in x.sent[:30]]
-        inbox = [compact_mail(m, "received") for m in x.inbox[:30]]
+ 
+        sent = [
+            compact_mail(m, "sent")
+            for m in (x.sent or [])[:30]
+        ]
+
+        # ============================================
+        # FIND OBVIOUS FIRST-PERSON COMMITMENT PHRASES
+        # ============================================
+
+        commitment_patterns = re.compile(
+            r"\b("
+            r"I['’]?ll\b|"
+            r"I\s+will\b|"
+            r"I\s+can\b|"
+            r"I\s+plan\s+to\b|"
+            r"I\s+intend\s+to\b|"
+            r"let\s+me\b"
+            r")",
+            re.IGNORECASE
+        )
+
+        candidate_commitments = []
+
+        for mail in sent:
+            body = mail.get("body", "")
+
+            if not body:
+                continue
+
+            sentences = re.split(
+                r"(?<=[.!?])\s+",
+                body
+            )
+
+            for sentence in sentences:
+                sentence = sentence.strip()
+
+                if not sentence:
+                    continue
+
+                if commitment_patterns.search(sentence):
+                    candidate_commitments.append({
+                        "emailId": mail.get("id"),
+                        "subject": mail.get("subject"),
+                        "quote": sentence[:500],
+                        "timestamp": mail.get("timestamp"),
+                        "from": mail.get("from"),
+                        "toRecipients": mail.get("toRecipients", []),
+                        "webLink": mail.get("webLink", "")
+                    })
+
+        print("\n========================================")
+        print("   DETECTED COMMITMENT CANDIDATES")
+        print("========================================")
+        print(
+            "Candidate count:",
+            len(candidate_commitments)
+        )
+
+        for candidate in candidate_commitments:
+            print(
+                "→",
+                candidate["quote"]
+            )
+
+        print("========================================\n")
+ 
+        inbox = [
+            compact_mail(m, "received")
+            for m in (x.inbox or [])[:30]
+        ]
+
+        
+        
+ 
+        print("Compacted sent emails:", len(sent))
+        print("Compacted inbox emails:", len(inbox))
+ 
+        # ----------------------------------------
+        # Check actual email content
+        # ----------------------------------------
+        if sent:
+            print("\nFIRST SENT EMAIL")
+            print("----------------")
+            print("Subject:", sent[0].get("subject"))
+            print("From:", sent[0].get("from"))
+            print("To:", sent[0].get("toRecipients"))
+            print("Body length:", len(sent[0].get("body", "")))
+            print("Body preview:", sent[0].get("body", "")[:500])
+ 
+        if inbox:
+            print("\nFIRST INBOX EMAIL")
+            print("-----------------")
+            print("Subject:", inbox[0].get("subject"))
+            print("From:", inbox[0].get("from"))
+            print("Body length:", len(inbox[0].get("body", "")))
+            print("Body preview:", inbox[0].get("body", "")[:500])
+ 
+        # ----------------------------------------
+        # Build AI input
+        # ----------------------------------------
         user_content = {
-            "NOW": x.now or datetime.now(timezone.utc).isoformat(),
-            "EMPLOYEE": x.employee,
-            "SENT_EMAILS": sent,
-            "INBOX_EMAILS": inbox
-        }
-        content = provider_call([
-            {"role": "system", "content": COMMITMENT_SYSTEM},
-            {"role": "user", "content": json.dumps(user_content, ensure_ascii=False)}
-        ], temperature=0.05)
-        data = json.loads(content)
-        data.setdefault("generatedAt", datetime.now(timezone.utc).isoformat())
+    "NOW": x.now or datetime.now(timezone.utc).isoformat(),
+    "EMPLOYEE": x.employee,
+    "SENT_EMAILS": sent,
+    "INBOX_EMAILS": inbox,
+    "OBVIOUS_COMMITMENT_CANDIDATES": candidate_commitments
+}
+ 
+        payload = json.dumps(
+            user_content,
+            ensure_ascii=False
+        )
+ 
+        print("\nAI PAYLOAD")
+        print("----------------")
+        print("Payload characters:", len(payload))
+ 
+        print("System prompt characters:", len(COMMITMENT_SYSTEM))
+ 
+        # ----------------------------------------
+        # CALL AI PROVIDER
+        # ----------------------------------------
+        print("\nCalling provider_call()...")
+        
+        try:
+            content = provider_call(
+                [
+                    {
+                        "role": "system",
+                        "content": COMMITMENT_SYSTEM
+                    },
+                    {
+                        "role": "user",
+                        "content": payload
+                    }
+                ],
+                temperature=0.05
+            )
+        except Exception as e:
+            print("AI provider unavailable; using deterministic fallback:", repr(e))
+            content = ""
+ 
+        print("\nAI PROVIDER RESPONSE RECEIVED")
+        print("-----------------------------")
+        print("Response type:", type(content))
+        print("Response length:", len(str(content)))
+        print("Raw AI response:")
+        print(str(content)[:3000])
+ 
+        # ----------------------------------------
+        # Parse AI JSON
+        # ----------------------------------------
+        print("\nParsing AI JSON...")
+
+        data = parse_commitment_response(content)
+ 
+        print("JSON parsing SUCCESS")
+        print("Returned keys:", list(data.keys()))
+ 
+        data.setdefault(
+            "generatedAt",
+            datetime.now(timezone.utc).isoformat()
+        )
+ 
         data.setdefault("summary", {})
         data.setdefault("commitments", [])
+
+        # ============================================
+        # FALLBACK FOR OBVIOUS COMMITMENTS
+        # ============================================
+ 
+        print("\nChecking deterministic commitment fallback...")
+ 
+        fallback_commitments = build_fallback_commitments(
+            sent,
+            x.now or datetime.now(timezone.utc).isoformat()
+        )
+ 
+        print(
+            "Fallback commitments detected:",
+            len(fallback_commitments)
+        )
+ 
+        for fc in fallback_commitments:
+            print(
+                "FALLBACK →",
+                fc["originalQuote"]
+            )
+ 
+        # --------------------------------------------
+        # If AI missed obvious commitments,
+        # use deterministic candidates.
+        # --------------------------------------------
+ 
+        model_commitments = normalize_commitments(data.get("commitments"))
+        if not model_commitments and fallback_commitments:
+ 
+            print(
+                "\nAI returned 0 commitments."
+                "\nUsing deterministic fallback."
+            )
+ 
+            data["commitments"] = fallback_commitments
+
+        else:
+            data["commitments"] = model_commitments
+
+        # ============================================
+        # REBUILD SUMMARY FROM FINAL COMMITMENTS
+        # ============================================
+ 
+        final_commitments = normalize_commitments(data.get("commitments"))
+        data["commitments"] = final_commitments
+        data["summary"] = rebuild_commitment_summary(final_commitments)
+ 
+        print("\nFINAL COMMITMENT COUNT:")
+        print(len(final_commitments))
+ 
+        print("\nFINAL SUMMARY:")
+        print(data["summary"])
+ 
+        print("\nFINAL COMMITMENTS:")
+ 
+        for c in final_commitments:
+ 
+            print(
+                "→",
+                c.get("title"),
+                "|",
+                c.get("status"),
+                "|",
+                c.get("originalQuote")
+            )
+ 
+ 
+        print("Commitments returned:", len(data["commitments"]))
+ 
+        print("\n========================================")
+        print("        COMMITMENT API SUCCESS")
+        print("========================================")
+        print("\n")
+ 
         return data
+ 
     except json.JSONDecodeError as e:
-        raise HTTPException(500, f"Commitment AI returned invalid JSON: {e}")
+ 
+        print("\n")
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print("       COMMITMENT JSON ERROR")
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print("JSON error:", repr(e))
+        print("AI content was:")
+        print(str(content)[:5000] if "content" in locals() else "NO AI RESPONSE")
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print("\n")
+ 
+        raise HTTPException(
+            status_code=500,
+            detail=f"Commitment AI returned invalid JSON: {e}"
+        )
+ 
     except Exception as e:
-        raise HTTPException(500, str(e))
+ 
+        import traceback
+ 
+        print("\n")
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print("       COMMITMENT BACKEND ERROR")
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print("Error type:", type(e).__name__)
+        print("Error:", repr(e))
+        print("\nFULL TRACEBACK:")
+        traceback.print_exc()
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print("\n")
+ 
+        raise HTTPException(
+            status_code=500,
+            detail=f"Commitment backend error: {str(e)}"
+        )
+ 
 
 class DraftReq(BaseModel):
     commitment: dict = Field(default_factory=dict)

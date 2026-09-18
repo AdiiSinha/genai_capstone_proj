@@ -47,7 +47,12 @@ export const getProfile = token =>
 export const getMail = token =>
   req(
     token,
-    "/me/mailFolders/inbox/messages?$top=50&$orderby=receivedDateTime%20desc&$select=id,subject,from,toRecipients,receivedDateTime,body,bodyPreview,importance,isRead,hasAttachments,webLink,flag"
+    "/me/mailFolders/inbox/messages?$top=50&$orderby=receivedDateTime%20desc&$select=id,subject,from,toRecipients,receivedDateTime,body,bodyPreview,importance,isRead,hasAttachments,webLink,flag",
+    {
+      headers: {
+        Prefer: 'outlook.body-content-type="text"'
+      }
+    }
   );
  
  
@@ -80,7 +85,11 @@ export const getSentMail = async token => {
  
   while (url) {
  
-    const data = await req(token, url);
+    const data = await req(token, url, {
+      headers: {
+        Prefer: 'outlook.body-content-type="text"'
+      }
+    });
  
     if (Array.isArray(data.value)) {
       messages.push(...data.value);
@@ -105,12 +114,27 @@ export const getSentMail = async token => {
   };
 };
  
-/* Fetch one complete message when the user opens evidence/details. */
-export const getMailMessage = (token, id) => req(
-  token,
-  `/me/messages/${encodeURIComponent(id)}?$select=id,subject,from,toRecipients,ccRecipients,sentDateTime,receivedDateTime,body,bodyPreview,webLink,conversationId,internetMessageId`
-);
-
+ 
+/* =========================================================
+   FETCH ONE COMPLETE MESSAGE
+   Used when opening evidence/details
+========================================================= */
+ 
+export const getMailMessage = (token, id) =>
+  req(
+    token,
+    `/me/messages/${encodeURIComponent(id)}`,
+    {
+      headers: {
+        Prefer: 'outlook.body-content-type="text"'
+      }
+    }
+  );
+ 
+ 
+/* =========================================================
+   SEND MAIL
+========================================================= */
  
 export const sendMail = (token, x) =>
   req(token, "/me/sendMail", {
@@ -151,6 +175,10 @@ export const sendMail = (token, x) =>
   .then(() => ({ success: true }));
  
  
+/* =========================================================
+   CREATE DRAFT
+========================================================= */
+ 
 export const createDraft = (token, x) =>
   req(token, "/me/messages", {
     method: "POST",
@@ -186,6 +214,10 @@ export const createDraft = (token, x) =>
   });
  
  
+/* =========================================================
+   MARK MAIL IMPORTANT
+========================================================= */
+ 
 export const markImportant = (token, id) =>
   req(
     token,
@@ -198,6 +230,10 @@ export const markImportant = (token, id) =>
     }
   );
  
+ 
+/* =========================================================
+   FLAG MAIL
+========================================================= */
  
 export const flagMail = (token, id) =>
   req(
@@ -331,6 +367,11 @@ export const updateCalendarImportance = (token, id, important) =>
 export const getCalendarEvent = (token, id) =>
   req(
     token,
-    `/me/events/${encodeURIComponent(id)}?$select=id,subject,body,bodyPreview,start,end,location,locations,organizer,attendees,isAllDay,isCancelled,isOnlineMeeting,onlineMeetingProvider,onlineMeeting,webLink,importance,showAs,responseStatus,sensitivity,isReminderOn,reminderMinutesBeforeStart,createdDateTime,lastModifiedDateTime,recurrence,seriesMasterId`
+    `/me/events/${encodeURIComponent(id)}?$select=id,subject,body,bodyPreview,start,end,location,locations,organizer,attendees,isAllDay,isCancelled,isOnlineMeeting,onlineMeetingProvider,onlineMeeting,webLink,importance,showAs,responseStatus,sensitivity,isReminderOn,reminderMinutesBeforeStart,createdDateTime,lastModifiedDateTime,recurrence,seriesMasterId`,
+    {
+      headers: {
+        Prefer: 'outlook.body-content-type="text"'
+      }
+    }
   );
  

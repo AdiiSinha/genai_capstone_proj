@@ -37,7 +37,277 @@ export function Commit({ask}){
   const [items,setItems]=useState([]),[summary,setSummary]=useState({}),[loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[err,setErr]=useState(""),[last,setLast]=useState("");
   const [tab,setTab]=useState("all"),[q,setQ]=useState(""),[person,setPerson]=useState("all"),[project,setProject]=useState("all"),[selected,setSelected]=useState(null),[source,setSource]=useState(null),[draft,setDraft]=useState(null),[draftBusy,setDraftBusy]=useState(false),[toast,setToast]=useState("");
   async function token(){try{return(await instance.acquireTokenSilent({scopes:loginRequest.scopes,account:instance.getActiveAccount()||account})).accessToken}catch{return(await instance.acquireTokenPopup({scopes:loginRequest.scopes})).accessToken}}
-  async function run(force=false){setBusy(true);setErr("");try{const t=await token();const [s,i,p]=await Promise.all([getSentMail(t),getMail(t),getProfile(t)]);const sent=(s.value||[]).map(x=>mailShape(x,"sent"));const inbox=(i.value||[]).map(x=>mailShape(x,"received"));const d=await analyzeAI(sent,inbox,p);const list=withOverrides(d.commitments||[]);setItems(list);setSummary(d.summary||{});setLast(d.generatedAt||new Date().toISOString());if(force)setToast("Commitments refreshed from real Outlook mail.")}catch(e){setErr(e.message||"Unable to analyze commitments.");}finally{setBusy(false);setLoading(false)}}
+  async function run(force = false) {
+  setBusy(true);
+  setErr("");
+ 
+  try {
+    const t = await token();
+ 
+    // ============================================
+    // 1. LOAD REAL OUTLOOK DATA
+    // ============================================
+ 
+    const [s, i, p] = await Promise.all([
+      getSentMail(t),
+      getMail(t),
+      getProfile(t)
+    ]);
+ 
+    const rawSent = s.value || [];
+    const rawInbox = i.value || [];
+ 
+    console.log("========================================");
+    console.log("      COMMITMENT GRAPH DEBUG");
+    console.log("========================================");
+    console.log("Raw sent emails:", rawSent.length);
+    console.log("Raw inbox emails:", rawInbox.length);
+ 
+    // ============================================
+    // 2. SHAPE THE LIST RESULTS
+    // ============================================
+ 
+    let sent = rawSent.map(x => mailShape(x, "sent"));
+    let inbox = rawInbox.map(x => mailShape(x, "received"));
+ 
+    console.log("FIRST SENT AFTER mailShape:");
+    console.log(sent[0]);
+ 
+    console.log("FIRST SENT BODY:");
+    console.log(sent[0]?.body);
+ 
+    console.log("FIRST INBOX AFTER mailShape:");
+    console.log(inbox[0]);
+ 
+    console.log("FIRST INBOX BODY:");
+    console.log(inbox[0]?.body);
+ 
+    // ============================================
+    // 3. FETCH COMPLETE MESSAGE BODY IF MISSING
+    // ============================================
+ 
+    async function enrichMessages(list) {
+      return Promise.all(
+        list.map(async (mail) => {
+ 
+          // If body already exists, keep it.
+          if (mail.body && mail.body.trim()) {
+            return mail;
+          }
+ 
+          // No body -> fetch the complete Graph message.
+          if (!mail.id) {
+            console.warn(
+              "⚠️ Cannot fetch complete message: missing ID",
+              mail
+            );
+            return mail;
+          }
+ 
+          try {
+            console.log(
+              "Fetching complete Graph message:",
+              mail.id,
+              mail.subject
+            );
+ 
+            const full = await getMailMessage(t, mail.id);
+ 
+            const fullBody =
+              typeof full?.body === "string"
+                ? full.body
+                : full?.body?.content;
+ 
+            const cleanedBody = clean(
+              fullBody || full?.bodyPreview || ""
+            ).slice(0, 6500);
+ 
+            console.log(
+              "Complete message body length:",
+              cleanedBody.length
+            );
+ 
+            if (cleanedBody) {
+              return {
+                ...mail,
+ 
+                body: cleanedBody,
+ 
+                subject:
+                  full?.subject ||
+                  mail.subject,
+ 
+                from:
+                  full?.from?.emailAddress ||
+                  mail.from,
+ 
+                toRecipients:
+                  full?.toRecipients ||
+                  mail.toRecipients,
+ 
+                ccRecipients:
+                  full?.ccRecipients ||
+                  mail.ccRecipients,
+ 
+                sentDateTime:
+                  full?.sentDateTime ||
+                  mail.sentDateTime,
+ 
+                receivedDateTime:
+                  full?.receivedDateTime ||
+                  mail.receivedDateTime,
+ 
+                webLink:
+                  full?.webLink ||
+                  mail.webLink,
+ 
+                conversationId:
+                  full?.conversationId ||
+                  mail.conversationId
+              };
+            }
+ 
+            console.warn(
+              "⚠️ Complete Graph message also has no body:",
+              mail.subject
+            );
+ 
+            return mail;
+ 
+          } catch (e) {
+ 
+            console.error(
+              "❌ Failed to fetch complete message:",
+              mail.subject,
+              e
+            );
+ 
+            return mail;
+          }
+        })
+      );
+    }
+ 
+    // Fetch complete bodies only where necessary.
+    sent = await enrichMessages(sent);
+    inbox = await enrichMessages(inbox);
+ 
+    // ============================================
+    // 4. FINAL BODY DEBUG
+    // ============================================
+ 
+    console.log("\n========================================");
+    console.log("       FINAL COMMITMENT EMAIL DATA");
+    console.log("========================================");
+ 
+    console.log("Sent count:", sent.length);
+    console.log("Inbox count:", inbox.length);
+ 
+    sent.forEach((mail, index) => {
+      console.log(
+        `SENT ${index + 1}:`,
+        mail.subject,
+        "| body length:",
+        mail.body?.length || 0,
+        "| body:",
+        mail.body
+      );
+    });
+ 
+    inbox.forEach((mail, index) => {
+      console.log(
+        `INBOX ${index + 1}:`,
+        mail.subject,
+        "| body length:",
+        mail.body?.length || 0,
+        "| body:",
+        mail.body
+      );
+    });
+ 
+    console.log("========================================\n");
+ 
+    // ============================================
+    // 5. SEND REAL EMAIL CONTENT TO AI
+    // ============================================
+ 
+    console.log("Sending emails to Commitment AI...");
+ 
+    const d = await analyzeAI(
+      sent,
+      inbox,
+      p
+    );
+ 
+    // ============================================
+    // 6. AI RESPONSE DEBUG
+    // ============================================
+ 
+    console.log("========================================");
+    console.log("       COMMITMENT AI RESULT");
+    console.log("========================================");
+ 
+    console.log("AI response:", d);
+    console.log(
+      "AI commitments:",
+      d?.commitments
+    );
+    console.log(
+      "AI commitment count:",
+      d?.commitments?.length || 0
+    );
+    console.log(
+      "AI summary:",
+      d?.summary
+    );
+ 
+    console.log("========================================\n");
+ 
+    // ============================================
+    // 7. UPDATE UI
+    // ============================================
+ 
+    const list = withOverrides(
+      d.commitments || []
+    );
+ 
+    setItems(list);
+    setSummary(d.summary || {});
+    setLast(
+      d.generatedAt ||
+      new Date().toISOString()
+    );
+ 
+    if (force) {
+      setToast(
+        "Commitments refreshed from real Outlook mail."
+      );
+    }
+ 
+  } catch (e) {
+ 
+    console.error(
+      "❌ COMMITMENT ANALYSIS ERROR:",
+      e
+    );
+ 
+    console.error(
+      "Error message:",
+      e?.message
+    );
+ 
+    setErr(
+      e.message ||
+      "Unable to analyze commitments."
+    );
+ 
+  } finally {
+ 
+    setBusy(false);
+    setLoading(false);
+  }
+}
+ 
   useEffect(()=>{if(account)run();},[account?.homeAccountId]);
   const people=useMemo(()=>[...new Set(items.map(x=>x.recipientName).filter(Boolean))].sort(),[items]);
   const projects=useMemo(()=>[...new Set(items.map(x=>x.project).filter(Boolean))].sort(),[items]);
