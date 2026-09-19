@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- Background Gradient -->
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="70%" fx="30%" fy="25%">
+      <stop offset="0%" stop-color="#092244" />
+      <stop offset="45%" stop-color="#041022" />
+      <stop offset="100%" stop-color="#02060e" />
+    </radialGradient>
+
+    <!-- Neon Cyan-Indigo Border Gradient -->
+    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38eaff" />
+      <stop offset="50%" stop-color="#2563eb" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+
+    <!-- Core Star Gradient -->
+    <linearGradient id="starGrad" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="25%" stop-color="#5bf3ff" />
+      <stop offset="65%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+
+    <!-- Orbit Gradient -->
+    <linearGradient id="orbitGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38eaff" stop-opacity="0.95" />
+      <stop offset="60%" stop-color="#3b82f6" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#c084fc" stop-opacity="0.9" />
+    </linearGradient>
+
+    <!-- Glow Filters -->
+    <filter id="neonGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="14" result="blur1" />
+      <feGaussianBlur stdDeviation="28" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur2" />
+        <feMergeNode in="blur1" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Squircle Base Canvas -->
+  <rect x="24" y="24" width="464" height="464" rx="104" ry="104" fill="url(#bgGrad)" />
+  
+  <!-- Outer Tech Border -->
+  <rect x="24" y="24" width="464" height="464" rx="104" ry="104" fill="none" stroke="url(#borderGrad)" stroke-width="7" filter="url(#softGlow)" />
+
+  <!-- Concentric Cyber Tracks & Circuit Nodes -->
+  <g opacity="0.45">
+    <!-- Outer Track -->
+    <circle cx="256" cy="256" r="168" fill="none" stroke="#38eaff" stroke-width="2.5" stroke-dasharray="16 12 4 12" />
+    <!-- Inner Track -->
+    <circle cx="256" cy="256" r="132" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="8 8" />
+    <!-- Innermost Track -->
+    <circle cx="256" cy="256" r="96" fill="none" stroke="#8b5cf6" stroke-width="1.5" stroke-opacity="0.6" />
+
+    <!-- Circuit Ticks / Nodes -->
+    <circle cx="256" cy="88" r="4.5" fill="#38eaff" />
+    <circle cx="256" cy="424" r="4.5" fill="#38eaff" />
+    <circle cx="88" cy="256" r="4.5" fill="#38eaff" />
+    <circle cx="424" cy="256" r="4.5" fill="#a855f7" />
+
+    <!-- Secondary Nodes -->
+    <circle cx="138" cy="138" r="3.5" fill="#38eaff" opacity="0.7" />
+    <circle cx="374" cy="374" r="3.5" fill="#c084fc" opacity="0.7" />
+    <circle cx="374" cy="138" r="3.5" fill="#38eaff" opacity="0.7" />
+    <circle cx="138" cy="374" r="3.5" fill="#c084fc" opacity="0.7" />
+  </g>
+
+  <!-- Dynamic Cyber Orbital Ring Behind -->
+  <g transform="rotate(-28 256 256)">
+    <ellipse cx="256" cy="256" rx="200" ry="60" fill="none" stroke="url(#orbitGrad)" stroke-width="14" stroke-linecap="round" opacity="0.35" filter="url(#neonGlow)" />
+    <ellipse cx="256" cy="256" rx="200" ry="60" fill="none" stroke="url(#orbitGrad)" stroke-width="7" stroke-linecap="round" />
+  </g>
+
+  <!-- Central Workday Copilot 4-Point Starburst Emblem (✦) -->
+  <!-- Back Glow Flare -->
+  <path d="M 256 86 Q 256 256 86 256 Q 256 256 256 426 Q 256 256 426 256 Q 256 256 256 86 Z"
+        fill="url(#starGrad)" opacity="0.6" filter="url(#neonGlow)" />
+
+  <!-- Crisp Central Core Starburst -->
+  <path d="M 256 96 Q 256 256 96 256 Q 256 256 256 416 Q 256 256 416 256 Q 256 256 256 96 Z"
+        fill="url(#starGrad)" />
+
+  <!-- Diagonal Secondary Micro-Flares -->
+  <g opacity="0.8">
+    <path d="M 256 168 Q 256 256 168 256 Q 256 256 256 344 Q 256 256 344 256 Q 256 256 256 168 Z"
+          transform="rotate(45 256 256)"
+          fill="#38eaff" opacity="0.65" />
+  </g>
+
+  <!-- Dynamic Cyber Orbital Ring Foreground Cross-over -->
+  <g transform="rotate(-28 256 256)">
+    <!-- Foreground Arc of the Orbit -->
+    <path d="M 56 256 A 200 60 0 0 0 456 256" fill="none" stroke="url(#orbitGrad)" stroke-width="10" stroke-linecap="round" filter="url(#softGlow)" />
+    <!-- Inner crisp core of the ring -->
+    <path d="M 80 256 A 180 50 0 0 0 432 256" fill="none" stroke="#e0faff" stroke-width="2" stroke-linecap="round" opacity="0.8" />
+  </g>
+
+  <!-- Radiant Nexus Core (White Energy Flare Center) -->
+  <circle cx="256" cy="256" r="16" fill="#ffffff" filter="url(#softGlow)" />
+  <circle cx="256" cy="256" r="8" fill="#ffffff" />
+</svg>
