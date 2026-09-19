@@ -1,0 +1,5 @@
+/* Modular Design System & Stylesheet Entry point */
+@import "./base.css";
+
+/* Maintain main styles.css backward compatibility */
+@import "../styles.css";

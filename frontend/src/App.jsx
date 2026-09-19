@@ -14,7 +14,15 @@ import {
   updateCalendarImportance
 } from "./graph";
 import { teams, tasks, rooms, buses, news, projects } from "./data";
-import { ai, BASE_SUGGESTIONS, dynamicFallback, fallback } from "./services/ai";
+import {
+  ai,
+  approveHITL,
+  fetchBackendNotifications,
+  getPendingHITL,
+  BASE_SUGGESTIONS,
+  dynamicFallback,
+  fallback
+} from "./services/ai";
 import { cleanSpeech, chooseVoice } from "./services/speech";
 import { eventDate } from "./calendarDate";
 
@@ -71,6 +79,14 @@ export function App() {
   const remindedMeetingsRef = useRef(new Set());
   const mountedRef = useRef(true);
   const [commitments, setCommitments] = useState([]);
+  const sessionId = useMemo(() => {
+    let sid = localStorage.getItem("wd_session_id");
+    if (!sid) {
+      sid = "sess-" + Math.random().toString(36).slice(2, 10);
+      localStorage.setItem("wd_session_id", sid);
+    }
+    return sid;
+  }, []);
 
   useEffect(() => () => {
     mountedRef.current = false;
@@ -88,7 +104,7 @@ export function App() {
   useEffect(() => {
     if (!account) return;
     setSplash(true);
-    const timer = setTimeout(() => setSplash(false), 1500);
+    const timer = setTimeout(() => setSplash(false), 2200);
     load();
     clearInterval(calendarPollRef.current);
     clearInterval(commitmentPollRef.current);
@@ -401,7 +417,26 @@ async function load() {
   }
 
   useEffect(() => {
-    setNotifications(buildNotifications());
+    let active = true;
+    async function loadNotifications() {
+      try {
+        const t = await token();
+        const serverItems = await fetchBackendNotifications({
+          emails: d.m,
+          calendar: d.c,
+          commitments
+        }, t);
+        if (active && serverItems?.length) {
+          setNotifications(serverItems);
+          return;
+        }
+      } catch (e) {
+        console.warn("Backend notifications fallback:", e);
+      }
+      if (active) setNotifications(buildNotifications());
+    }
+    loadNotifications();
+    return () => { active = false; };
   }, [d, commitments]);
 
   function markNotificationRead(id) {
@@ -445,7 +480,7 @@ async function load() {
     setState("thinking");
     try {
       const memory = JSON.parse(localStorage.getItem("wdmem") || "[]");
-      const z = await ai({ query: text, context: ctx, memory });
+      const z = await ai({ query: text, context: ctx, memory, session_id: sessionId });
       if (requestId !== requestRef.current) return;
       const answer = String(z.answer || "").trim();
       setMsgs(x => [...x, { r: "a", t: answer, actions: z.actions || [] }]);
@@ -564,7 +599,16 @@ async function load() {
   async function doSend(x) {
     try {
       const t = await token();
-      await sendMail(t, x);
+      if (x.approval_id) {
+        await approveHITL(x.approval_id, "approve", t, {
+          to: x.to,
+          subject: x.subject,
+          body: x.body,
+          cc: x.cc
+        });
+      } else {
+        await sendMail(t, x);
+      }
       setModal(null);
       setToast(`Email sent successfully to ${x.to}`);
       load();
@@ -704,7 +748,7 @@ function openMeetingMail(event) {
         onAskAI={askAIForNotification}
       />
 
-      <div className={`layout ${sidebarOpen ? "" : "sidebarCollapsed"}`}>
+      <div className={`layout ${sidebarOpen ? "" : "sidebarCollapsed"} ${mod === "workplace" ? "hideRight" : ""}`}>
         <Sidebar
           mod={mod}
           setMod={setMod}
@@ -801,10 +845,10 @@ function openMeetingMail(event) {
           {mod === "projects" && <Projects />}
           {mod === "waiting" && <Waiting ask={ask} />}
           {mod === "workplace" && <Workplace />}
-          {mod === "rooms" && <Rooms />}
+          {mod === "rooms" && <Rooms c={d.c} profile={d.p} ask={ask} />}
         </main>
 
-        <Right set={setMod} />
+        {mod !== "workplace" && <Right set={setMod} />}
       </div>
 
       {modal && (

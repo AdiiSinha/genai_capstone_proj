@@ -1,0 +1,95 @@
+/**
+ * roomsUtils.js — Data models and helper functions for Rooms & Floor Map module.
+ */
+export const ENTERPRISE_ROOMS = [
+  {
+    id: "orion-1",
+    name: "Orion 1",
+    floor: "4F",
+    capacity: 8,
+    available: true,
+    nextSlot: "Available until 3:30 PM",
+    bookedUntil: "3:30 PM",
+    amenities: ["4K Display", "Video Conf", "Whiteboard"],
+    currentMeeting: null,
+    x: 40,
+    y: 40,
+    w: 180,
+    h: 120
+  },
+  {
+    id: "orion-2",
+    name: "Orion 2",
+    floor: "4F",
+    capacity: 12,
+    available: false,
+    nextSlot: "Booked until 4:15 PM",
+    bookedUntil: "4:15 PM",
+    amenities: ["Dual Screen VC", "Polycom Audio", "Whiteboard", "Catering"],
+    currentMeeting: { title: "Atlas Architecture Defect Review", organizer: "Vikram Rao", end: "4:15 PM" },
+    x: 240,
+    y: 40,
+    w: 220,
+    h: 120
+  },
+  {
+    id: "andromeda",
+    name: "Andromeda",
+    floor: "4F",
+    capacity: 16,
+    available: true,
+    nextSlot: "Available all day",
+    bookedUntil: "EOD",
+    amenities: ["Interactive Board", "Dual VC", "Executive Seating"],
+    currentMeeting: null,
+    x: 480,
+    y: 40,
+    w: 200,
+    h: 120
+  },
+  {
+    id: "sirius",
+    name: "Sirius",
+    floor: "5F",
+    capacity: 6,
+    available: true,
+    nextSlot: "Available until 5:00 PM",
+    bookedUntil: "5:00 PM",
+    amenities: ["4K Display", "Wireless Presenter"],
+    currentMeeting: null,
+    x: 40,
+    y: 40,
+    w: 190,
+    h: 120
+  },
+  {
+    id: "polaris",
+    name: "Polaris",
+    floor: "5F",
+    capacity: 10,
+    available: false,
+    nextSlot: "Booked until 3:00 PM",
+    bookedUntil: "3:00 PM",
+    amenities: ["Dual VC", "Whiteboard"],
+    currentMeeting: { title: "Executive Leadership Sync", organizer: "Neha Kapoor", end: "3:00 PM" },
+    x: 260,
+    y: 40,
+    w: 200,
+    h: 120
+  },
+  {
+    id: "vega",
+    name: "Vega",
+    floor: "5F",
+    capacity: 8,
+    available: true,
+    nextSlot: "Available until 4:30 PM",
+    bookedUntil: "4:30 PM",
+    amenities: ["Smart Display", "Conference Audio"],
+    currentMeeting: null,
+    x: 480,
+    y: 40,
+    w: 200,
+    h: 120
+  }
+];

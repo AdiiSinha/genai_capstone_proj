@@ -15,7 +15,7 @@ import requests
 import urllib3
 from dotenv import load_dotenv
 
-from custom_embeddings import CGGenerativeEngineEmbeddings
+from services.custom_embeddings import CGGenerativeEngineEmbeddings
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 

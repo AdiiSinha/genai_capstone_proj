@@ -1,6 +1,7 @@
 export function cleanSpeech(text) {
   return String(text || "")
-    .replace(/[#*_`]/g, "")
+    .replace(/[*_`#]/g, "")
+    .replace(/[—–]/g, "-")
     .replace(/\[(.*?)\]\(.*?\)/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
