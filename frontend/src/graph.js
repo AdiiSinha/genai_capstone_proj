@@ -54,6 +54,42 @@ export const getMail = token =>
       }
     }
   );
+
+export const getJunkMail = async token => {
+  const select = [
+    "id",
+    "subject",
+    "from",
+    "toRecipients",
+    "receivedDateTime",
+    "body",
+    "bodyPreview",
+    "importance",
+    "isRead",
+    "hasAttachments",
+    "webLink",
+    "flag"
+  ].join(",");
+  let url = `/me/mailFolders/junkemail/messages?$top=100&$orderby=receivedDateTime%20desc&$select=${encodeURIComponent(select)}`;
+  const messages = [];
+
+  while (url) {
+    const data = await req(token, url, {
+      headers: {
+        Prefer: 'outlook.body-content-type="text"'
+      }
+    });
+    if (Array.isArray(data.value)) messages.push(...data.value);
+    if (data["@odata.nextLink"]) {
+      const next = data["@odata.nextLink"];
+      url = next.startsWith(G) ? next.substring(G.length) : next;
+    } else {
+      url = null;
+    }
+  }
+
+  return { value: messages };
+};
  
  
 /* =========================================================
@@ -292,6 +328,7 @@ export const getCalendar = async token => {
     "location",
     "locations",
     "organizer",
+    "isOrganizer",
     "attendees",
     "isAllDay",
     "isCancelled",
@@ -372,6 +409,15 @@ export const updateCalendarImportance = (token, id, important) =>
       body: JSON.stringify({
         importance: important ? "high" : "normal"
       })
+    }
+  );
+
+export const deleteCalendarEvent = (token, id) =>
+  req(
+    token,
+    `/me/events/${encodeURIComponent(id)}`,
+    {
+      method: "DELETE"
     }
   );
  

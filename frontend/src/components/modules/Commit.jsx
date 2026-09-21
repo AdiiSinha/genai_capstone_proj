@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useMsal } from "@azure/msal-react";
 import { loginRequest } from "../../auth";
-import { createDraft, getMail, getMailMessage, getProfile, getSentMail, sendMail } from "../../graph";
+import { createDraft, getJunkMail, getMail, getMailMessage, getProfile, getSentMail, sendMail } from "../../graph";
 import { Title } from "../common/Title";
 
 const API = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const OVERRIDES = "wdCommitmentOverrides";
+const COMMITMENT_CACHE_PREFIX = "wdCommitmentCache:v4:";
+const COMMITMENT_CACHE_TTL = 10 * 60 * 1000;
 
 const clean = (v = "") => {
   const d = document.createElement("div"); d.innerHTML = String(v);
@@ -22,6 +24,34 @@ function mailShape(m, direction) {
 }
 function overrides(){ try{return JSON.parse(localStorage.getItem(OVERRIDES)||"{}")}catch{return{}} }
 function withOverrides(list){const o=overrides();return list.map(x=>o[x.id]?{...x,...o[x.id]}:x)}
+function withCommitmentType(list, type) { return (list || []).map(item => ({ ...item, commitmentType: item.commitmentType || type })); }
+
+function commitmentCacheKey(account) {
+  return `${COMMITMENT_CACHE_PREFIX}${account?.homeAccountId || account?.username || "default"}`;
+}
+
+function readCommitmentCache(account) {
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(commitmentCacheKey(account)) || "null");
+    if (!cached || Date.now() - cached.cachedAt > COMMITMENT_CACHE_TTL) return null;
+    return cached;
+  } catch {
+    return null;
+  }
+}
+
+function writeCommitmentCache(account, data) {
+  try {
+    sessionStorage.setItem(commitmentCacheKey(account), JSON.stringify({
+      cachedAt: Date.now(),
+      commitments: data.commitments || [],
+      summary: data.summary || {},
+      generatedAt: data.generatedAt || new Date().toISOString()
+    }));
+  } catch {
+    // Storage may be unavailable or full; the live workflow still works.
+  }
+}
 
 async function analyzeAI(sent, inbox, employee){
   const r=await fetch(`${API}/api/commitments`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sent,inbox,employee,now:new Date().toISOString()})});
@@ -36,7 +66,23 @@ export function Commit({ask}){
   const {instance,accounts}=useMsal(); const account=accounts[0];
   const [items,setItems]=useState([]),[summary,setSummary]=useState({}),[loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[err,setErr]=useState(""),[last,setLast]=useState("");
   const [tab,setTab]=useState("all"),[q,setQ]=useState(""),[person,setPerson]=useState("all"),[project,setProject]=useState("all"),[selected,setSelected]=useState(null),[source,setSource]=useState(null),[draft,setDraft]=useState(null),[draftBusy,setDraftBusy]=useState(false),[toast,setToast]=useState("");
+  const [toastSeconds, setToastSeconds] = useState(5);
   async function token(){try{return(await instance.acquireTokenSilent({scopes:loginRequest.scopes,account:instance.getActiveAccount()||account})).accessToken}catch{return(await instance.acquireTokenPopup({scopes:loginRequest.scopes})).accessToken}}
+  useEffect(() => {
+    if (!toast) return undefined;
+    setToastSeconds(5);
+    const timer = window.setInterval(() => {
+      setToastSeconds(previous => {
+        if (previous <= 1) {
+          window.clearInterval(timer);
+          setToast("");
+          return 0;
+        }
+        return previous - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [toast]);
   async function run(force = false) {
   setBusy(true);
   setErr("");
@@ -48,14 +94,15 @@ export function Commit({ask}){
     // 1. LOAD REAL OUTLOOK DATA
     // ============================================
  
-    const [s, i, p] = await Promise.all([
+    const [s, i, j, p] = await Promise.all([
       getSentMail(t),
       getMail(t),
+      getJunkMail(t),
       getProfile(t)
     ]);
  
     const rawSent = s.value || [];
-    const rawInbox = i.value || [];
+    const rawInbox = [...(i.value || []), ...(j.value || [])];
  
     console.log("========================================");
     console.log("      COMMITMENT GRAPH DEBUG");
@@ -267,9 +314,12 @@ export function Commit({ask}){
     // 7. UPDATE UI
     // ============================================
  
-    const list = withOverrides(
-      d.commitments || []
-    );
+    const selfCommitments = withCommitmentType(d.commitments, "self");
+    const receivedCommitments = withCommitmentType(d.receivedCommitments, "received");
+    const list = withOverrides([
+      ...selfCommitments,
+      ...receivedCommitments
+    ]);
  
     setItems(list);
     setSummary(d.summary || {});
@@ -277,6 +327,11 @@ export function Commit({ask}){
       d.generatedAt ||
       new Date().toISOString()
     );
+    writeCommitmentCache(account, {
+      commitments: list,
+      summary: d.summary || {},
+      generatedAt: d.generatedAt
+    });
  
     if (force) {
       setToast(
@@ -308,11 +363,28 @@ export function Commit({ask}){
   }
 }
  
-  useEffect(()=>{if(account)run();},[account?.homeAccountId]);
+  useEffect(() => {
+    if (!account) return;
+
+    const cached = readCommitmentCache(account);
+    if (cached) {
+      setItems(withOverrides((cached.commitments || []).map(item => ({
+        ...item,
+        commitmentType: item.commitmentType || "self"
+      }))));
+      setSummary(cached.summary || {});
+      setLast(cached.generatedAt || "");
+      setLoading(false);
+      return;
+    }
+
+    run();
+  }, [account?.homeAccountId]);
   const people=useMemo(()=>[...new Set(items.map(x=>x.recipientName).filter(Boolean))].sort(),[items]);
   const projects=useMemo(()=>[...new Set(items.map(x=>x.project).filter(Boolean))].sort(),[items]);
-  const filtered=useMemo(()=>{const s=q.toLowerCase();return items.filter(x=>{if(tab!=="all"&&tab!=="soon"&&x.status!==(tab))return false;if(tab==="soon"&&!['due_today','due_soon'].includes(x.status))return false;if(person!=="all"&&x.recipientName!==person)return false;if(project!=="all"&&x.project!==project)return false;return !s||[x.title,x.action,x.recipientName,x.project,x.originalQuote,x.sourceSubject].filter(Boolean).join(" ").toLowerCase().includes(s)})},[items,tab,q,person,project]);
-  function complete(c){const o=overrides();o[c.id]={...(o[c.id]||{}),status:"completed",completionDetected:false,completionAt:new Date().toISOString(),completionEvidence:"Marked complete by employee."};localStorage.setItem(OVERRIDES,JSON.stringify(o));setItems(x=>x.map(y=>y.id===c.id?{...y,...o[c.id]}:y));setToast("Commitment marked complete.")}
+  const filtered=useMemo(()=>{const s=q.toLowerCase();return items.filter(x=>{if(tab==="self"&&x.commitmentType!=="self")return false;if(tab==="received"&&x.commitmentType!=="received")return false;if(tab==="active"&&x.status==="completed")return false;if(!["all","self","received","soon","active"].includes(tab)&&x.status!==tab)return false;if(tab==="soon"&&!['due_today','due_soon'].includes(x.status))return false;if(person!=="all"&&x.recipientName!==person)return false;if(project!=="all"&&x.project!==project)return false;return !s||[x.title,x.action,x.recipientName,x.project,x.originalQuote,x.sourceSubject].filter(Boolean).join(" ").toLowerCase().includes(s)})},[items,tab,q,person,project]);
+  function selectKpi(filter) { setTab(tab === filter ? "all" : filter); }
+  function complete(c){const o=overrides();o[c.id]={...(o[c.id]||{}),status:"completed",completionDetected:false,completionAt:new Date().toISOString(),completionEvidence:"Marked complete by employee."};localStorage.setItem(OVERRIDES,JSON.stringify(o));setItems(x=>{const next=x.map(y=>y.id===c.id?{...y,...o[c.id]}:y);const nextSummary={...summary,active:Math.max(0,(summary.active||0)-1),completed:(summary.completed||0)+1};setSummary(nextSummary);writeCommitmentCache(account,{commitments:next,summary:nextSummary,generatedAt:last});return next});setToast("Commitment marked complete.")}
   async function evidence(c){setSelected(c);setSource(null);try{const t=await token();setSource(await getMailMessage(t,c.sourceId))}catch(e){setToast(e.message)}}
   async function makeDraft(c){setDraftBusy(true);try{setDraft(await draftAI(c))}catch(e){setToast(e.message)}finally{setDraftBusy(false)}}
   async function saveDraft(){setDraftBusy(true);try{await createDraft(await token(),draft);setDraft(null);setToast("Follow-up saved to Outlook Drafts.")}catch(e){setToast(e.message)}finally{setDraftBusy(false)}}
@@ -320,27 +392,27 @@ export function Commit({ask}){
   const active=items.filter(x=>x.status!=="completed").length;
   return <div className="commitmentsAI">
     <style>{CSS}</style>
-    <div className="cHead"><div><Title k="MEMORY & FOLLOW-UP" t="Your commitments"/><p>AI reads your real Outlook sent and received mail to discover promises, deadlines and completion evidence.</p></div><div className="cHeadActions"><span className="liveAI"><i/> LIVE GRAPH + AI</span><button onClick={()=>run(true)} disabled={busy}>↻ {busy?"Analyzing…":"Refresh analysis"}</button></div></div>
+    <div className="cHead"><div><Title k="MEMORY & FOLLOW-UP" t="Your commitments"/><p>AI reads your real Outlook sent and received mail to discover promises, deadlines and completion evidence.</p></div><div className="cHeadActions"><span className="liveAI"><i/> LIVE GRAPH + AI</span><button onClick={()=>run(true)} disabled={busy}>↻ {busy?"Analyzing…":"Refresh"}</button></div></div>
     {err&&<div className="cError">⚠ <div><b>Commitment analysis failed</b><small>{err}</small></div><button onClick={()=>run(true)}>Retry</button></div>}
-    <div className="cStats"><Stat n={active} t="Active" s="tracked promises"/><Stat n={summary.dueToday||0} t="Due today" s="needs attention" a/><Stat n={summary.overdue||0} t="Overdue" s="follow up now" r/><Stat n={summary.completed||0} t="Completed" s="AI verified" g/><Stat n={summary.noDeadline||0} t="No deadline" s="needs planning" v/></div>
+    <div className="cStats"><Stat n={active} t="Active" s="tracked promises" onClick={()=>selectKpi("active")} active={tab === "active"}/><Stat n={summary.dueToday||0} t="Due today" s="needs attention" a onClick={()=>selectKpi("due_today")} active={tab === "due_today"}/><Stat n={summary.overdue||0} t="Overdue" s="follow up now" r/><Stat n={summary.completed||0} t="Completed" s="AI verified" g/><Stat n={summary.noDeadline||0} t="No deadline" s="needs planning" v onClick={()=>selectKpi("no_deadline")} active={tab === "no_deadline"}/></div>
     {(summary.overdue||summary.dueToday)&&<div className="cAlert"><b>✦ AI attention</b><span>{(summary.overdue||0)+(summary.dueToday||0)} commitment{((summary.overdue||0)+(summary.dueToday||0))!==1?"s":""} may need action.</span><button onClick={()=>setTab(summary.overdue?"overdue":"due_today")}>Review →</button></div>}
-    <div className="cToolbar"><div className="cTabs">{[["all","All",items.length],["due_today","Due today",summary.dueToday||0],["due_soon","Due soon",items.filter(x=>x.status==="due_soon").length],["overdue","Overdue",summary.overdue||0],["completed","Completed",summary.completed||0]].map(([id,l,n])=><button className={tab===id?"on":""} onClick={()=>setTab(id)} key={id}>{l}<em>{n}</em></button>)}</div><label className="cSearch">⌕<input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search commitments…"/></label><select value={person} onChange={e=>setPerson(e.target.value)}><option value="all">Everyone</option>{people.map(x=><option key={x}>{x}</option>)}</select><select value={project} onChange={e=>setProject(e.target.value)}><option value="all">All projects</option>{projects.map(x=><option key={x}>{x}</option>)}</select></div>
-    {loading?<Loading/>:<div className="cList">{filtered.length?filtered.map((c,i)=><Card key={c.id||i} c={c} i={i} complete={complete} evidence={evidence} draft={makeDraft} ask={ask}/>):<div className="cEmpty"><div>◎</div><h3>No commitments in this view</h3><p>Try another filter or refresh the AI analysis.</p></div>}</div>}
+    <div className="cToolbar"><div className="cTabs">{[["all","All",items.length],["self","Sent",items.filter(x=>x.commitmentType==="self").length],["received","Received",items.filter(x=>x.commitmentType==="received").length],["due_today","Due today",summary.dueToday||0],["due_soon","Due soon",items.filter(x=>x.status==="due_soon").length],["overdue","Overdue",summary.overdue||0],["completed","Completed",summary.completed||0]].map(([id,l,n])=><button className={tab===id?"on":""} onClick={()=>setTab(id)} key={id}>{l}<em>{n}</em></button>)}</div><label className="cSearch">⌕<input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search commitments…"/></label><select value={person} onChange={e=>setPerson(e.target.value)}><option value="all">Everyone</option>{people.map(x=><option key={x}>{x}</option>)}</select><select value={project} onChange={e=>setProject(e.target.value)}><option value="all">All projects</option>{projects.map(x=><option key={x}>{x}</option>)}</select></div>
+    {loading || busy ? <CommitmentLoading/> : <div className="cList">{filtered.length?filtered.map((c,i)=><Card key={c.id||i} c={c} i={i} complete={complete} evidence={evidence} draft={makeDraft} ask={ask}/>):<div className="cEmpty"><div>◎</div><h3>No commitments in this view</h3><p>Try another filter or refresh the AI analysis.</p></div>}</div>}
     <div className="cFoot">✦ {items.length} commitment{items.length===1?"":"s"} detected from authorized Outlook context{last?` · Last analyzed ${fmt(last)}`:""}. <b>Nothing is sent automatically.</b></div>
     {selected&&<Drawer c={selected} source={source} close={()=>{setSelected(null);setSource(null)}} ask={ask} draft={makeDraft}/>} 
     {draft&&<Draft d={draft} set={setDraft} close={()=>setDraft(null)} save={saveDraft} send={approve} busy={draftBusy}/>} 
-    {toast&&<div className="cToast">✦ {toast}<button onClick={()=>setToast("")}>×</button></div>}
+    {toast&&<div className="cToast" role="status" aria-live="polite"><div className="cToastGlow"/><div className="cToastIcon">✦</div><div className="cToastBody"><strong>Commitments updated</strong><span>{toast}</span></div><button className="cToastClose" onClick={()=>setToast("")} aria-label={`Close notification, auto-closes in ${toastSeconds} seconds`}><span>{toastSeconds}</span><b>×</b></button><div className="cToastProgress" style={{"--toast-progress": `${toastSeconds * 20}%`}}/></div>}
   </div>
 }
-function Stat({n,t,s,a,r,g,v}){return <div className={`cStat ${a?"amber":r?"red":g?"green":v?"violet":"cyan"}`}><i/><div><b>{n}</b><strong>{t}</strong><small>{s}</small></div></div>}
+function Stat({n,t,s,a,r,g,v,onClick,active}){return <button type="button" className={`cStat ${a?"amber":r?"red":g?"green":v?"violet":"cyan"} ${active?"selected":""}`} onClick={onClick}><i/><span><b>{n}</b><strong>{t}</strong><small>{s}</small></span></button>}
 function Loading(){return <div className="cList">{[1,2,3].map(x=><div className="cSkeleton" key={x}/>)}</div>}
+function CommitmentLoading(){return <><style>{`.commitmentLoading{min-height:260px;display:grid;place-items:center;align-content:center;gap:10px;color:#9eb5c8;text-align:center}.commitmentLoading strong{font-size:13px;color:#dceefa}.commitmentLoading>span{font-size:9px;color:#6f879b}.commitmentLoader{display:flex;gap:7px}.commitmentLoader i{width:9px;height:9px;border-radius:50%;background:#5bdcff;box-shadow:0 0 14px #5bdcff;animation:commitmentPulse 1s ease-in-out infinite}.commitmentLoader i:nth-child(2){animation-delay:.16s}.commitmentLoader i:nth-child(3){animation-delay:.32s}@keyframes commitmentPulse{0%,100%{transform:scale(.55);opacity:.35}50%{transform:scale(1.2);opacity:1}}`}</style><div className="commitmentLoading"><div className="commitmentLoader"><i/><i/><i/></div><strong>Scanning your mail for commitments</strong><span>Checking sent, inbox, and junk messages...</span></div></>}
 function Card({c,i,complete,evidence,draft,ask}){const done=c.status==="completed";const label={overdue:"OVERDUE",due_today:"DUE TODAY",due_soon:"DUE SOON",pending:"PENDING",no_deadline:"NO DEADLINE",completed:"COMPLETED"}[c.status]||"PENDING";return <article className={`cCard ${c.status}`} style={{animationDelay:`${i*50}ms`}}><div className="cAccent"/><div className="cTop"><div className="cOrb">{done?"✓":"◎"}</div><div className="cMain"><div className="cMeta"><span className={`badge ${c.status}`}>{label}</span><span>AI {c.confidence||0}%</span>{c.priority==="high"&&<b>HIGH PRIORITY</b>}</div><h3>{c.title||c.action}</h3><p>{c.action}</p><div className="facts"><span>👤 {c.recipientName||c.recipientEmail||"Recipient not identified"}</span>{c.project&&<span>◇ {c.project}</span>}<span>◷ {c.dueLabel||"No deadline"}</span>{c.dueAt&&<span>{relative(c.dueAt)}</span>}</div></div><button className="details" onClick={()=>evidence(c)}>Details →</button></div><div className="quote"><b>“</b><p>{c.originalQuote||"No source phrase returned."}</p><small>{fmt(c.promisedAt)} · {c.sourceSubject||"Email"}</small></div><div className="cBottom"><div className="who"><span>{initials(c.recipientName||c.recipientEmail)}</span><div><b>{c.recipientName||c.recipientEmail||"Unknown recipient"}</b><small>Promised via Outlook · {fmt(c.promisedAt)}</small></div></div><div className="actions">{c.sourceWebLink&&<a href={c.sourceWebLink} target="_blank" rel="noreferrer">Open email ↗</a>}{!done&&<button onClick={()=>complete(c)}>✓ Complete</button>}{!done&&<button onClick={()=>draft(c)}>✦ Draft follow-up</button>}<button className="ask" onClick={()=>ask(`Why was this commitment detected? Where did I promise it and what should I do next?\n\nCommitment: ${c.action}\nRecipient: ${c.recipientName||c.recipientEmail}\nDue: ${c.dueLabel}\nEvidence: ${c.originalQuote}`)}>Ask AI →</button></div></div>{c.completionDetected&&c.completionEvidence&&<div className="proof">✓ <div><b>AI detected completion evidence</b><p>“{c.completionEvidence}”</p><small>{c.completionSubject||"Later email"} · {c.completionAt?fmt(c.completionAt):""}</small></div></div>}{c.risk&&c.risk!=="none"&&!done&&<div className={`risk ${c.risk}`}>⚠ <b>{c.risk==="high"?"Needs attention":"Potential risk"}</b><span>{c.riskReason}</span></div>}</article>}
 function Drawer({c,source,close,ask,draft}){return <div className="drawerBack" onClick={close}><aside className="drawer" onClick={e=>e.stopPropagation()}><button className="x" onClick={close}>×</button><small className="kicker">COMMITMENT EVIDENCE</small><h2>{c.title||c.action}</h2><p className="drawerAction">{c.action}</p><section><label>WHAT YOU PROMISED</label><blockquote>“{c.originalQuote}”</blockquote><small>AI confidence {c.confidence||0}% · {c.confidenceReason||"Semantic workplace commitment detected."}</small></section><section><label>WHO · WHEN · WHERE</label><div className="grid"><Info l="Promised to" v={c.recipientName||c.recipientEmail||"Not identified"}/><Info l="Deadline" v={c.dueLabel||"No deadline"}/><Info l="Promised on" v={fmt(c.promisedAt)}/><Info l="Project / topic" v={c.project||"Not identified"}/><Info l="Subject" v={c.sourceSubject||"Not available"}/><Info l="Source" v="Microsoft Outlook"/></div></section><section><label>ORIGINAL EMAIL</label>{source?<div className="email"><b>{source.subject||c.sourceSubject}</b><small>{source.from?.emailAddress?.name||source.from?.emailAddress?.address||"You"} → {(source.toRecipients||[]).map(x=>x.emailAddress?.name||x.emailAddress?.address).filter(Boolean).join(", ")}</small><small>{fmt(source.sentDateTime||source.receivedDateTime)}</small><p>{clean(source.body?.content||source.bodyPreview||"Email body unavailable.")}</p></div>:<div className="loadingEvidence">Loading original Graph message…</div>}</section>{c.completionDetected&&<section><label>COMPLETION DETECTION</label><div className="timeline"><b>Promise</b><span>{fmt(c.promisedAt)}</span><p>{c.originalQuote}</p><hr/><b>Completion evidence</b><span>{fmt(c.completionAt)}</span><p>{c.completionEvidence||"Later email evidence matched the promise."}</p></div></section>}<section><label>AI REASONING</label><div className="reason"><b>Detection</b><p>{c.confidenceReason||"The model found first-person commitment intent in the source email."}</p><b>Risk</b><p>{c.riskReason||"No additional risk signal."}</p></div></section><footer>{c.sourceWebLink&&<a href={c.sourceWebLink} target="_blank" rel="noreferrer">Open original email ↗</a>}<button onClick={()=>ask(`Explain this commitment using only the source evidence. Did I complete it?\n${c.originalQuote}`)}>Ask AI →</button>{c.status!=="completed"&&<button className="primary" onClick={()=>draft(c)}>Draft follow-up</button>}</footer></aside></div>}
 function Info({l,v}){return <div className="info"><small>{l}</small><b>{v}</b></div>}
 function Draft({d,set,close,save,send,busy}){return <div className="drawerBack"><div className="draft"><button className="x" onClick={close}>×</button><small className="kicker">HUMAN APPROVAL · AI DRAFT</small><h2>Follow up on commitment</h2><p>AI prepared this message from the detected commitment. Review it before saving or sending.</p><label>To<input value={d.to||""} onChange={e=>set({...d,to:e.target.value})}/></label><label>Subject<input value={d.subject||""} onChange={e=>set({...d,subject:e.target.value})}/></label><label>Message<textarea rows="11" value={d.body||""} onChange={e=>set({...d,body:e.target.value})}/></label><div className="approval">✓ Human approval required. Nothing is sent automatically.</div><footer><button onClick={close}>Cancel</button><button disabled={busy} onClick={save}>▣ Save Outlook draft</button><button className="primary" disabled={busy} onClick={send}>✦ Approve & Send</button></footer></div></div>}
 
 const CSS=`
-.commitmentsAI{position:relative}.cHead{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:14px}.cHead p{margin:2px 0;color:#8ea1b5;font-size:10px;line-height:1.55;max-width:760px}.cHeadActions{display:flex;gap:8px;align-items:center}.liveAI{font-size:8px;letter-spacing:1.2px;color:#8ceaff;border:1px solid rgba(80,220,255,.2);padding:9px;border-radius:999px;background:rgba(80,220,255,.045);white-space:nowrap}.liveAI i{display:inline-block;width:6px;height:6px;border-radius:50%;background:#5bdcff;box-shadow:0 0 10px #5bdcff;margin-right:6px}.cHeadActions>button,.cToolbar select,.cTabs button,.actions button,.actions a,.details,.drawer footer button,.drawer footer a{border:1px solid rgba(130,170,205,.16);background:rgba(255,255,255,.03);color:#a7b9c9;border-radius:8px;cursor:pointer}.cHeadActions>button{padding:9px 11px;font-size:9px}.cHeadActions>button:hover,.actions button:hover,.actions a:hover,.details:hover{border-color:rgba(80,220,255,.3);color:#d9f8ff;transform:translateY(-1px)}.cStats{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin:12px 0}.cStat{display:flex;gap:10px;align-items:center;padding:12px;border:1px solid rgba(120,170,205,.13);border-radius:13px;background:linear-gradient(145deg,rgba(19,37,59,.75),rgba(8,18,32,.8));transition:.25s}.cStat:hover{transform:translateY(-3px);border-color:rgba(80,220,255,.25)}.cStat>i{width:7px;height:34px;border-radius:6px;background:currentColor;box-shadow:0 0 14px currentColor}.cStat div{display:grid;gap:1px}.cStat b{font-size:22px;color:#eef7ff}.cStat strong{font-size:11px;color:#d3e0eb}.cStat small{font-size:8px;color:#687e94}.cStat.cyan{color:#5bdcff}.cStat.amber{color:#ffbf66}.cStat.red{color:#ff7386}.cStat.green{color:#68e3a4}.cStat.violet{color:#b497ff}.cAlert{display:flex;align-items:center;gap:10px;padding:11px 13px;margin:10px 0;border:1px solid rgba(255,190,90,.16);border-radius:11px;background:rgba(255,180,70,.045);animation:in .35s ease}.cAlert b{color:#ffc56d;font-size:10px}.cAlert span{flex:1;color:#899caf;font-size:9px}.cAlert button{border:0;background:transparent;color:#82e8ff;cursor:pointer;font-size:9px;font-weight:700}.cToolbar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:7px;margin:9px 0 12px;border:1px solid rgba(120,170,205,.12);border-radius:12px;background:rgba(7,17,29,.42)}.cTabs{display:flex;gap:3px;flex-wrap:wrap}.cTabs button{padding:7px 8px;font-size:8px;border:0;background:transparent;color:#8094aa}.cTabs button.on{color:#bdf3ff;background:rgba(80,215,255,.08)}.cTabs em{font-style:normal;margin-left:4px;opacity:.6}.cSearch{flex:1;min-width:160px;display:flex;align-items:center;gap:5px;border:1px solid rgba(120,170,205,.14);border-radius:8px;padding:0 8px;color:#647b91}.cSearch input{border:0;outline:0;background:transparent;color:#dce8f3;padding:8px 0;width:100%;font-size:9px}.cToolbar select{padding:8px 9px;font-size:8px;outline:0;background:#0f1d30}.cList{display:grid;gap:10px}.cCard{position:relative;overflow:hidden;padding:14px 15px;border:1px solid rgba(120,170,205,.15);border-radius:14px;background:linear-gradient(145deg,rgba(17,36,58,.88),rgba(8,19,33,.9));box-shadow:0 10px 30px rgba(0,0,0,.12);animation:cardIn .45s both;transition:.27s}.cCard:hover{transform:translateY(-3px);border-color:rgba(80,220,255,.28);box-shadow:0 18px 40px rgba(0,0,0,.22)}.cAccent{position:absolute;left:0;top:0;bottom:0;width:3px;background:#5bdcff}.cCard.overdue .cAccent{background:#ff7386}.cCard.due_today .cAccent{background:#ffbf66}.cCard.completed .cAccent{background:#68e3a4}.cCard.no_deadline .cAccent{background:#b497ff}.cTop{display:flex;gap:11px;align-items:flex-start}.cOrb{width:37px;height:37px;flex:none;border-radius:11px;display:grid;place-items:center;color:#6fe5ff;background:rgba(70,210,255,.07);border:1px solid rgba(80,220,255,.16);font-size:18px}.cCard.overdue .cOrb{color:#ff8798;background:rgba(255,70,90,.07)}.cCard.completed .cOrb{color:#72e6aa;background:rgba(70,220,140,.07)}.cMain{flex:1;min-width:0}.cMeta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;color:#63798e;font-size:7px}.cMeta b{color:#ff9ba7;font-size:7px}.badge{padding:4px 6px;border-radius:999px;border:1px solid rgba(120,170,205,.16);font-size:7px;letter-spacing:1px}.badge.overdue{color:#ff8798;background:rgba(255,70,90,.07)}.badge.due_today{color:#ffc66d;background:rgba(255,180,60,.07)}.badge.due_soon{color:#7de7ff;background:rgba(70,210,255,.06)}.badge.completed{color:#72e6aa;background:rgba(70,220,140,.06)}.cMain h3{margin:6px 0 2px;font-size:15px;color:#edf5ff}.cMain>p{margin:0;color:#9aafc2;font-size:9px;line-height:1.45}.facts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.facts span{padding:5px 6px;border-radius:6px;background:rgba(255,255,255,.025);color:#7f94a9;font-size:8px}.details{padding:7px 9px;font-size:8px;white-space:nowrap}.quote{display:grid;grid-template-columns:17px 1fr;gap:3px;margin:11px 0 9px;padding:9px 10px;border:1px solid rgba(120,170,205,.09);border-radius:9px;background:rgba(0,8,17,.35)}.quote>b{font-size:20px;color:#5bdcff}.quote p{margin:0;color:#c6d5e2;font-size:9px;line-height:1.5;font-style:italic}.quote small{grid-column:2;color:#61768c;font-size:7px}.cBottom{display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:1px solid rgba(120,170,205,.08);padding-top:9px}.who{display:flex;gap:7px;align-items:center;min-width:0}.who>span{width:27px;height:27px;display:grid;place-items:center;border-radius:50%;background:#13334b;color:#a7edff;font-size:8px}.who div{display:grid;gap:1px;min-width:0}.who b{font-size:8px;color:#cbd8e4}.who small{font-size:7px;color:#61778c}.actions{display:flex;gap:5px;justify-content:flex-end;flex-wrap:wrap}.actions button,.actions a{padding:7px 8px;font-size:7px;text-decoration:none}.actions .ask{color:#7de7ff}.proof,.risk{display:flex;gap:8px;align-items:flex-start;margin-top:9px;padding:8px;border-radius:8px;font-size:8px}.proof{background:rgba(70,220,140,.045);border:1px solid rgba(70,220,140,.1);color:#72e6aa}.proof div{display:grid;gap:2px}.proof p{margin:0;color:#abc4b5;font-style:italic}.proof small{color:#5f7b69}.risk{background:rgba(255,180,70,.035);color:#ffc36d}.risk.high{background:rgba(255,70,90,.04);color:#ff94a2}.risk span{color:#8497aa}.cFoot{margin-top:10px;color:#5d7289;font-size:7px}.cFoot:first-letter{color:#5bdcff}.cFoot b{font-weight:500;color:#74889b}.cEmpty{text-align:center;padding:55px;border:1px dashed rgba(120,170,205,.14);border-radius:14px}.cEmpty>div{font-size:30px;color:#5bdcff}.cEmpty h3{margin:8px 0 4px}.cEmpty p{font-size:9px;color:#71859a}.cSkeleton{height:185px;border-radius:14px;background:linear-gradient(90deg,rgba(20,36,56,.7),rgba(36,54,74,.7),rgba(20,36,56,.7));background-size:200% 100%;animation:shine 1.4s infinite}.cError{display:flex;gap:10px;align-items:center;padding:10px;border:1px solid rgba(255,80,100,.2);background:rgba(255,70,90,.05);border-radius:10px;color:#ff8797;font-size:11px}.cError div{display:grid;gap:2px;flex:1}.cError small{color:#a7b6c4;font-size:8px}.cError button{border:1px solid rgba(255,255,255,.15);background:transparent;color:#fff;border-radius:7px;padding:6px 9px;cursor:pointer}.cToast{position:fixed;right:24px;bottom:22px;z-index:10001;padding:10px 12px;border:1px solid rgba(80,220,255,.2);background:rgba(7,17,29,.96);border-radius:9px;color:#cfe2ef;font-size:9px;box-shadow:0 20px 50px #0008}.cToast button{border:0;background:transparent;color:#8095aa;margin-left:8px;cursor:pointer}.drawerBack{position:fixed;inset:0;z-index:10000;background:#01070eb0;backdrop-filter:blur(5px);display:flex;justify-content:flex-end}.drawer{width:min(560px,93vw);height:100%;overflow:auto;padding:24px;background:linear-gradient(#0b192a,#07111f);border-left:1px solid rgba(100,180,220,.15);box-shadow:-25px 0 70px #0008;animation:slide .3s ease}.x{position:absolute;right:18px;top:14px;width:30px;height:30px;border:0;border-radius:8px;background:#ffffff09;color:#9cb0c2;font-size:19px;cursor:pointer}.kicker{font-size:8px;letter-spacing:1.6px;color:#5bdcff}.drawer h2{margin:9px 35px 3px 0;color:#eef6ff;font-size:20px}.drawerAction{margin:0;color:#8fa4b9;font-size:9px}.drawer section{padding:16px 0;border-bottom:1px solid rgba(120,170,205,.09)}.drawer section>label{font-size:7px;letter-spacing:1.4px;color:#627991}.drawer blockquote{margin:9px 0;padding:10px;border-left:2px solid #5bdcff;background:#50d8ff08;color:#cfdfeb;font-size:10px;font-style:italic;line-height:1.5}.drawer section>small{color:#70859a;font-size:7px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:9px}.info{padding:8px;background:#ffffff04;border:1px solid #78aad20e;border-radius:7px;display:grid;gap:2px}.info small{font-size:7px;color:#60768c}.info b{font-size:8px;color:#c8d8e5;word-break:break-word}.email,.reason,.timeline{margin-top:9px;padding:10px;border-radius:8px;background:#00000020;border:1px solid #78aad20e}.email{display:grid;gap:3px}.email b{font-size:9px;color:#dce8f4}.email small{font-size:7px;color:#627a91}.email p,.reason p,.timeline p{font-size:8px;color:#a8bac9;line-height:1.5;white-space:pre-wrap}.timeline{display:grid;gap:4px}.timeline b{font-size:8px;color:#bcd0df}.timeline span{font-size:7px;color:#61798e}.timeline hr{width:100%;border:0;border-top:1px solid #78aad20e}.drawer footer,.draft footer{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;padding-top:14px}.drawer footer button,.drawer footer a,.draft footer button{padding:8px 10px;font-size:8px;text-decoration:none}.primary{background:rgba(70,215,255,.09)!important;color:#8eeaff!important;border-color:rgba(70,215,255,.2)!important}.draft{width:min(650px,92vw);max-height:90vh;overflow:auto;margin:auto;position:relative;padding:24px;border-radius:16px;background:linear-gradient(#0b192a,#07111f);border:1px solid rgba(100,180,220,.16);box-shadow:0 30px 100px #000b;animation:pop .25s ease}.draft h2{color:#eef6ff;font-size:19px;margin:8px 0}.draft>p{font-size:8px;color:#7f94a8}.draft label{display:grid;gap:4px;margin:10px 0;color:#71879c;font-size:8px}.draft input,.draft textarea{font:inherit;color:#d8e6f2;background:#00000028;border:1px solid #78aad214;border-radius:7px;padding:9px;outline:0}.draft textarea{line-height:1.5;resize:vertical}.approval{padding:8px;border-radius:7px;background:#46dc8c08;border:1px solid #46dc8c16;color:#8ddfb0;font-size:8px}@keyframes cardIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}@keyframes in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}@keyframes slide{from{transform:translateX(100%)}to{transform:none}}@keyframes pop{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:none}}@keyframes shine{to{background-position:-200% 0}}@media(max-width:950px){.cStats{grid-template-columns:repeat(3,1fr)}.cHead{flex-direction:column}}@media(max-width:650px){.cStats{grid-template-columns:repeat(2,1fr)}.cBottom{flex-direction:column;align-items:flex-start}.actions{justify-content:flex-start}.grid{grid-template-columns:1fr}.cToolbar{align-items:stretch}.cSearch{flex-basis:100%}}
 `;
 
 export default Commit;

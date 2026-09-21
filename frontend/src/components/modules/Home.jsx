@@ -3,7 +3,7 @@ import { tasks } from "../../data";
 import { K } from "../common/K";
 import { Title } from "../common/Title";
 import { Orb } from "../common/Orb";
-import { formatEventTime } from "../../calendarDate";
+import { eventDate, formatEventTime } from "../../calendarDate";
 
 function getIndiaGreeting() {
   const hour = Number(new Intl.DateTimeFormat("en-IN", {
@@ -20,6 +20,17 @@ function getIndiaGreeting() {
 export function Home({ p, m, c, ask, set, suggestions }) {
   const u = tasks.filter(x => x[3] === "critical" || x[3] === "high").length;
   const greeting = getIndiaGreeting();
+  const upcomingCalendar = c
+    .filter(event => {
+      if (event.isCancelled || !event.start?.dateTime) return false;
+
+      const end = eventDate(event.end) || eventDate(event.start);
+      return end && end.getTime() > Date.now();
+    })
+    .sort((first, second) => (
+      eventDate(first.start).getTime() - eventDate(second.start).getTime()
+    ))
+    .slice(0, 3);
 
   return (
     <div>
@@ -90,7 +101,7 @@ export function Home({ p, m, c, ask, set, suggestions }) {
 
         <section className="panel">
           <Title k="UP NEXT" t="Calendar" />
-          {c.slice(0, 3).map(x => (
+          {upcomingCalendar.map(x => (
             <div className="line" key={x.id}>
               <strong>
                 {formatEventTime(x.start)}

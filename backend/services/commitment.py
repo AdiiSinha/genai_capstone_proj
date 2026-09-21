@@ -11,7 +11,7 @@ COMMITMENT_SYSTEM = """
 You are Workday Copilot's Commitment Intelligence engine.
  
 Analyze the supplied SENT_EMAILS and INBOX_EMAILS and identify commitments
-made BY THE EMPLOYEE.
+made BY THE EMPLOYEE, plus commitments made BY OTHER PEOPLE to the employee.
  
 The employee is the person represented by EMPLOYEE.
  
@@ -41,6 +41,12 @@ A commitment does NOT need to contain the word:
 commitment, task, action, deadline, promise.
  
 Natural workplace language counts.
+
+GROUNDING RULE:
+Every returned commitment must come from one supplied email. Copy the exact
+email id into sourceId and copy an exact contiguous sentence or phrase from
+that email into originalQuote. Never create a commitment, source id, title, or
+quote that cannot be supported by the supplied email body.
  
 IMPORTANT:
 Even "I'll get back to you" without a deadline IS a commitment.
@@ -54,7 +60,7 @@ SENT_EMAILS are the primary source.
  
 A promise made by the employee in SENT_EMAILS = employee commitment.
  
-A promise made by somebody else in INBOX_EMAILS = NOT employee commitment.
+A promise made by somebody else in INBOX_EMAILS = a received commitment.
  
 ==================================================
 COMPLETION
@@ -131,6 +137,34 @@ Return VALID JSON ONLY.
       "risk": "none",
       "riskReason": ""
     }
+    ],
+    "receivedCommitments": [
+        {
+            "id": "",
+            "title": "",
+            "action": "",
+            "status": "active",
+            "confidence": 95,
+            "confidenceReason": "",
+            "priority": "medium",
+            "recipientName": "",
+            "recipientEmail": "",
+            "project": "",
+            "dueAt": "",
+            "dueLabel": "",
+            "promisedAt": "",
+            "originalQuote": "",
+            "sourceId": "",
+            "sourceSubject": "",
+            "sourceWebLink": "",
+            "commitmentType": "received",
+            "completionDetected": false,
+            "completionEvidence": "",
+            "completionSubject": "",
+            "completionAt": "",
+            "risk": "none",
+            "riskReason": ""
+        }
   ]
 }
 """
@@ -158,7 +192,8 @@ COMMITMENT_DEFAULTS = {
     "completionSubject": "",
     "completionAt": "",
     "risk": "none",
-    "riskReason": ""
+    "riskReason": "",
+    "commitmentType": "self"
 }
 
 def normalize_commitments(value: Any) -> List[Dict[str, Any]]:
@@ -187,6 +222,19 @@ def parse_commitment_response(content: str) -> Dict[str, Any]:
         return {"commitments": []}
     return value if isinstance(value, dict) else {"commitments": []}
 
+def filter_grounded_commitments(commitments: List[Dict[str, Any]], mails: List[Dict[str, Any]], commitment_type: str) -> List[Dict[str, Any]]:
+    mail_by_id = {str(mail.get("id") or ""): mail for mail in mails}
+    grounded = []
+    for commitment in commitments:
+        source_id = str(commitment.get("sourceId") or "")
+        source = mail_by_id.get(source_id)
+        quote = re.sub(r"\s+", " ", str(commitment.get("originalQuote") or "")).strip().lower()
+        body = re.sub(r"\s+", " ", str(source.get("body") or "")).strip().lower() if source else ""
+        if not source or not quote or quote not in body:
+            continue
+        grounded.append({**commitment, "commitmentType": commitment_type})
+    return grounded
+
 def rebuild_commitment_summary(commitments: List[Dict[str, Any]]) -> Dict[str, int]:
     summary = {"active": 0, "dueToday": 0, "overdue": 0, "completed": 0, "noDeadline": 0}
     for commitment in commitments:
@@ -206,7 +254,7 @@ def rebuild_commitment_summary(commitments: List[Dict[str, Any]]) -> Dict[str, i
             summary["active"] += 1
     return summary
 
-def build_fallback_commitments(sent: List[Dict[str, Any]], now: str) -> List[Dict[str, Any]]:
+def build_fallback_commitments(sent: List[Dict[str, Any]], now: str, commitment_type: str = "self") -> List[Dict[str, Any]]:
     patterns = [
         r"\bi['’]ll\b",
         r"\bi\s+will\b",
@@ -283,6 +331,9 @@ def build_fallback_commitments(sent: List[Dict[str, Any]], now: str) -> List[Dic
             recipient_name = ""
             recipient_email = ""
             recipients = mail.get("toRecipients") or []
+            if commitment_type == "received":
+                sender = mail.get("from") or {}
+                recipients = [{"emailAddress": sender.get("emailAddress") or {}}]
             if recipients:
                 first = recipients[0] or {}
                 email_data = first.get("emailAddress") or {}
@@ -315,7 +366,8 @@ def build_fallback_commitments(sent: List[Dict[str, Any]], now: str) -> List[Dic
                 "completionSubject": "",
                 "completionAt": "",
                 "risk": "none",
-                "riskReason": ""
+                "riskReason": "",
+                "commitmentType": commitment_type
             })
     return commitment_items
 
@@ -373,20 +425,15 @@ def extract_commitments(sent: List[Dict[str, Any]], inbox: List[Dict[str, Any]],
             {"role": "user", "content": json.dumps(user_content, ensure_ascii=False)}
         ], temperature=0.05)
     except Exception as e:
-        logger.warning(f"AI provider unavailable for commitments; using fallback: {e}")
+        logger.warning(f"AI provider unavailable for commitments; returning no commitments: {e}")
         content = ""
 
     data = parse_commitment_response(content)
     data.setdefault("generatedAt", datetime.now(timezone.utc).isoformat())
-    fallback_commitments = build_fallback_commitments(compact_sent, now or datetime.now(timezone.utc).isoformat())
-    
     model_commitments = normalize_commitments(data.get("commitments"))
-    if not model_commitments and fallback_commitments:
-        data["commitments"] = fallback_commitments
-    else:
-        data["commitments"] = model_commitments
-
-    final_commitments = normalize_commitments(data.get("commitments"))
-    data["commitments"] = final_commitments
+    model_received = normalize_commitments(data.get("receivedCommitments"))
+    data["commitments"] = filter_grounded_commitments(model_commitments, compact_sent, "self")
+    data["receivedCommitments"] = filter_grounded_commitments(model_received, compact_inbox, "received")
+    final_commitments = data["commitments"] + data["receivedCommitments"]
     data["summary"] = rebuild_commitment_summary(final_commitments)
     return data

@@ -215,7 +215,9 @@ function MeetingCard({
   important,
   onImportant,
   onMail,
-  onJoin
+  onJoin,
+  onDiscard,
+  onComplete
 }) {
 
   const [expanded, setExpanded] = useState(false);
@@ -503,6 +505,20 @@ function MeetingCard({
               : "⌄ View details"}
           </button>
 
+          <button
+            className="meetingAction meetingDiscard"
+            onClick={() => onDiscard?.(event)}
+          >
+            Discard meeting
+          </button>
+
+          <button
+            className="meetingAction meetingComplete"
+            onClick={() => onComplete?.(event)}
+          >
+            ✓ Joined & completed
+          </button>
+
         </div>
 
       </div>
@@ -668,12 +684,22 @@ export function Calendar({
   ask,
   onMailOrganizer,
   onJoinMeeting,
-  onImportant
+  onImportant,
+  onRefresh,
+  onDiscard,
+  refreshing = false
 }) {
 
   const [filter, setFilter] = useState("all");
 
   const [search, setSearch] = useState("");
+  const [localState, setLocalState] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("wdCalendarMeetingState") || "{}");
+    } catch {
+      return {};
+    }
+  });
 
   const [importantIds, setImportantIds] = useState(
     () => {
@@ -692,6 +718,7 @@ export function Calendar({
 
     return [...c]
       .filter(Boolean)
+      .filter(event => !localState[event.id]?.discarded && !localState[event.id]?.completed)
       .sort((a, b) => {
 
         const da =
@@ -702,10 +729,21 @@ export function Calendar({
           safeDate(b.start)?.getTime() ||
           0;
 
-        return da - db;
+        if (da !== db) return da - db;
+
+        const ea = safeDate(a.end)?.getTime() || 0;
+        const eb = safeDate(b.end)?.getTime() || 0;
+
+        if (ea !== eb) return ea - eb;
+        return String(a.id || "").localeCompare(String(b.id || ""));
       });
 
-  }, [c]);
+  }, [c, localState]);
+
+  const completedEvents = useMemo(
+    () => Object.values(localState).filter(item => item.completed && item.event).map(item => item.event),
+    [localState]
+  );
 
 
   const categorized = useMemo(() => {
@@ -864,8 +902,25 @@ export function Calendar({
     );
   }
 
+  function updateLocalMeeting(event, state) {
+    setLocalState(previous => {
+      const next = { ...previous, [event.id]: { ...previous[event.id], ...state, event } };
+      localStorage.setItem("wdCalendarMeetingState", JSON.stringify(next));
+      return next;
+    });
+  }
 
-  if (!events.length) {
+  function handleDiscard(event) {
+    updateLocalMeeting(event, { discarded: true, discardedAt: new Date().toISOString() });
+    onDiscard?.(event);
+  }
+
+  function handleComplete(event) {
+    updateLocalMeeting(event, { completed: true, completedAt: new Date().toISOString() });
+  }
+
+
+  if (!events.length && !completedEvents.length) {
 
     return (
 
@@ -926,12 +981,20 @@ export function Calendar({
         </div>
 
 
-        <div className="calendarLiveBadge">
+        <div className="calendarHeaderActions">
+          <button
+            className="calendarRefresh"
+            onClick={onRefresh}
+            disabled={refreshing}
+          >
+            <span className={refreshing ? "refreshSpin" : ""}>↻</span>
+            {refreshing ? "Refreshing" : "Refresh"}
+          </button>
 
-          <i />
-
-          LIVE MICROSOFT GRAPH
-
+          <div className="calendarLiveBadge">
+            <i />
+            LIVE MICROSOFT GRAPH
+          </div>
         </div>
 
       </div>
@@ -1120,6 +1183,8 @@ export function Calendar({
                     )
               }
               onJoin={handleJoin}
+              onDiscard={handleDiscard}
+              onComplete={handleComplete}
             />
 
           ))
@@ -1127,6 +1192,29 @@ export function Calendar({
         )}
 
       </div>
+
+      {completedEvents.length > 0 && (
+        <section className="calendarCompletedSection">
+          <div className="calendarCompletedHeader">
+            <div>
+              <span>MEETING HISTORY</span>
+              <h3>Joined & completed</h3>
+            </div>
+            <small>{completedEvents.length} meeting{completedEvents.length === 1 ? "" : "s"}</small>
+          </div>
+          <div className="calendarCompletedList">
+            {completedEvents.map(event => (
+              <div className="calendarCompletedItem" key={event.id}>
+                <span className="calendarCompletedIcon">✓</span>
+                <div>
+                  <strong>{event.subject || "Untitled meeting"}</strong>
+                  <small>{formatFullDate(event.start)} · Completed</small>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
     </div>
   );

@@ -27,7 +27,7 @@ function getImportantReasons(mail, projectNames) {
   return reasons;
 }
 
-export function Mail({ m, sent = [], ask, reply, flag, important, markRead, projects = [] }) {
+export function Mail({ m, junk = [], sent = [], ask, reply, flag, important, markRead, projects = [], onRefresh, refreshing = false }) {
   const [tab, setTab] = useState("all");
   const [query, setQuery] = useState("");
 
@@ -37,6 +37,7 @@ export function Mail({ m, sent = [], ask, reply, flag, important, markRead, proj
 
   const allMail = useMemo(() => [
     ...m.map(mail => ({ ...mail, direction: "received" })),
+    ...junk.map(mail => ({ ...mail, direction: "received", isJunk: true })),
     ...sent.map(mail => ({ ...mail, direction: "sent" }))
   ].map(mail => ({
     ...mail,
@@ -49,6 +50,7 @@ export function Mail({ m, sent = [], ask, reply, flag, important, markRead, proj
     return allMail.filter(mail => {
       const matchesTab = tab === "all"
         || (tab === "received" && mail.direction === "received")
+        || (tab === "junk" && mail.isJunk)
         || (tab === "sent" && mail.direction === "sent")
         || (tab === "unread" && mail.direction === "received" && !mail.isRead)
         || (tab === "important" && mail.importantReasons.length > 0);
@@ -67,7 +69,13 @@ export function Mail({ m, sent = [], ask, reply, flag, important, markRead, proj
 
   return (
     <div className="module">
-      <Title k="COMMUNICATION" t="Inbox intelligence" />
+      <div className="mailHeading">
+        <Title k="COMMUNICATION" t="Inbox intelligence" />
+        <button className="mailRefresh" onClick={onRefresh} disabled={refreshing}>
+          <span className={refreshing ? "refreshSpin" : ""}>↻</span>
+          {refreshing ? "Refreshing" : "Refresh"}
+        </button>
+      </div>
       <p className="sub">Real Microsoft Graph mail, with concise AI actions.</p>
 
       <div className="mailToolbar">
@@ -81,6 +89,7 @@ export function Mail({ m, sent = [], ask, reply, flag, important, markRead, proj
           {[
             ["all", "All", allMail.length],
             ["received", "Received", m.length],
+            ["junk", "Junk", junk.length],
             ["sent", "Sent", sent.length],
             ["unread", "Unread", m.filter(mail => !mail.isRead).length],
             ["important", "Important", allMail.filter(mail => mail.importantReasons.length > 0).length]

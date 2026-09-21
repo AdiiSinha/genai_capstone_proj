@@ -4,6 +4,7 @@ import { loginRequest } from "./auth";
 import {
   getProfile,
   getMail,
+  getJunkMail,
   getSentMail,
   getCalendar,
   markRead,
@@ -11,18 +12,11 @@ import {
   createDraft,
   markImportant,
   flagMail,
-  updateCalendarImportance
+  updateCalendarImportance,
+  deleteCalendarEvent
 } from "./graph";
 import { teams, tasks, rooms, buses, news, projects } from "./data";
-import {
-  ai,
-  approveHITL,
-  fetchBackendNotifications,
-  getPendingHITL,
-  BASE_SUGGESTIONS,
-  dynamicFallback,
-  fallback
-} from "./services/ai";
+import { ai, BASE_SUGGESTIONS, dynamicFallback, fallback } from "./services/ai";
 import { cleanSpeech, chooseVoice } from "./services/speech";
 import { eventDate } from "./calendarDate";
 
@@ -53,6 +47,7 @@ export function App() {
   const [d, setD] = useState({
   p: null,
   m: [],
+  junk: [],
   sent: [],
   c: []
 });
@@ -64,14 +59,15 @@ export function App() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [splash, setSplash] = useState(false);
   const [suggestions, setSuggestions] = useState(BASE_SUGGESTIONS);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [autoListen, setAutoListen] = useState(true);
   const [muted, setMuted] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mailRefreshing, setMailRefreshing] = useState(false);
+  const [calendarRefreshing, setCalendarRefreshing] = useState(false);
   const [drafts, setDrafts] = useState(() => JSON.parse(localStorage.getItem("wdDrafts") || "[]"));
   const recognitionRef = useRef(null);
-  const requestRef = useRef(0);
   const autoTimerRef = useRef(null);
   const calendarPollRef = useRef(null);
   const commitmentPollRef = useRef(null);
@@ -79,14 +75,6 @@ export function App() {
   const remindedMeetingsRef = useRef(new Set());
   const mountedRef = useRef(true);
   const [commitments, setCommitments] = useState([]);
-  const sessionId = useMemo(() => {
-    let sid = localStorage.getItem("wd_session_id");
-    if (!sid) {
-      sid = "sess-" + Math.random().toString(36).slice(2, 10);
-      localStorage.setItem("wd_session_id", sid);
-    }
-    return sid;
-  }, []);
 
   useEffect(() => () => {
     mountedRef.current = false;
@@ -104,7 +92,7 @@ export function App() {
   useEffect(() => {
     if (!account) return;
     setSplash(true);
-    const timer = setTimeout(() => setSplash(false), 2200);
+    const timer = setTimeout(() => setSplash(false), 1500);
     load();
     clearInterval(calendarPollRef.current);
     clearInterval(commitmentPollRef.current);
@@ -139,9 +127,10 @@ async function load() {
   try {
     const t = await token();
  
-    const [p, m, sent, c] = await Promise.all([
+    const [p, m, junk, sent, c] = await Promise.all([
       getProfile(t),
       getMail(t),
+      getJunkMail(t),
       getSentMail(t),
       getCalendar(t)
     ]);
@@ -162,6 +151,7 @@ async function load() {
       setD({
         p,
         m: m.value || [],
+        junk: junk.value || [],
         sent: sent.value || [],
         c: c.value || []
       });
@@ -221,6 +211,7 @@ async function load() {
   }
 
   async function refreshCalendar() {
+    setCalendarRefreshing(true);
     try {
       const t = await token();
       const calendar = await getCalendar(t);
@@ -232,6 +223,35 @@ async function load() {
       checkMeetingReminders(events);
     } catch (e) {
       console.warn("CALENDAR REFRESH ERROR:", e);
+      setToast(`Calendar refresh failed: ${e.message}`);
+    } finally {
+      if (mountedRef.current) setCalendarRefreshing(false);
+    }
+  }
+
+  async function refreshMail() {
+    setMailRefreshing(true);
+    try {
+      const t = await token();
+      const [mail, junk, sent] = await Promise.all([getMail(t), getJunkMail(t), getSentMail(t)]);
+      const receivedEmails = mail.value || [];
+      const junkEmails = junk.value || [];
+      const sentEmails = sent.value || [];
+
+      if (!mountedRef.current) return;
+
+      commitmentDataRef.current = {
+        profile: d.p,
+        emails: receivedEmails,
+        sentEmails
+      };
+      setD(previous => ({ ...previous, m: receivedEmails, junk: junkEmails, sent: sentEmails }));
+      refreshCommitments(commitmentDataRef.current);
+      setToast("Inbox refreshed.");
+    } catch (e) {
+      setToast(`Inbox refresh failed: ${e.message}`);
+    } finally {
+      if (mountedRef.current) setMailRefreshing(false);
     }
   }
  
@@ -417,26 +437,7 @@ async function load() {
   }
 
   useEffect(() => {
-    let active = true;
-    async function loadNotifications() {
-      try {
-        const t = await token();
-        const serverItems = await fetchBackendNotifications({
-          emails: d.m,
-          calendar: d.c,
-          commitments
-        }, t);
-        if (active && serverItems?.length) {
-          setNotifications(serverItems);
-          return;
-        }
-      } catch (e) {
-        console.warn("Backend notifications fallback:", e);
-      }
-      if (active) setNotifications(buildNotifications());
-    }
-    loadNotifications();
-    return () => { active = false; };
+    setNotifications(buildNotifications());
   }, [d, commitments]);
 
   function markNotificationRead(id) {
@@ -471,7 +472,6 @@ async function load() {
 
   async function ask(text) {
     if (!text.trim()) return;
-    const requestId = ++requestRef.current;
     stopRecognition();
     clearTimeout(autoTimerRef.current);
     setQ("");
@@ -480,15 +480,13 @@ async function load() {
     setState("thinking");
     try {
       const memory = JSON.parse(localStorage.getItem("wdmem") || "[]");
-      const z = await ai({ query: text, context: ctx, memory, session_id: sessionId });
-      if (requestId !== requestRef.current) return;
+      const z = await ai({ query: text, context: ctx, memory });
       const answer = String(z.answer || "").trim();
       setMsgs(x => [...x, { r: "a", t: answer, actions: z.actions || [] }]);
       saveMemory(text, answer);
       setDynamicSuggestions(z.suggestions);
       speak(answer, true);
     } catch (e) {
-      if (requestId !== requestRef.current) return;
       const answer = fallback(text, d, teams.length);
       setMsgs(x => [...x, { r: "a", t: answer, actions: [] }]);
       saveMemory(text, answer);
@@ -500,17 +498,13 @@ async function load() {
 
   function speak(text, continueListening = false) {
     if (muted) {
-      setState("idle");
       if (continueListening && autoListen) {
         clearTimeout(autoTimerRef.current);
         autoTimerRef.current = setTimeout(() => startListening(true), 2300);
       }
       return;
     }
-    if (!window.speechSynthesis) {
-      setState("idle");
-      return;
-    }
+    if (!window.speechSynthesis) return;
     clearTimeout(autoTimerRef.current);
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(cleanSpeech(text));
@@ -535,7 +529,6 @@ async function load() {
   }
 
   function stopSpeaking() {
-    requestRef.current += 1;
     window.speechSynthesis?.cancel();
     setState("idle");
   }
@@ -599,16 +592,7 @@ async function load() {
   async function doSend(x) {
     try {
       const t = await token();
-      if (x.approval_id) {
-        await approveHITL(x.approval_id, "approve", t, {
-          to: x.to,
-          subject: x.subject,
-          body: x.body,
-          cc: x.cc
-        });
-      } else {
-        await sendMail(t, x);
-      }
+      await sendMail(t, x);
       setModal(null);
       setToast(`Email sent successfully to ${x.to}`);
       load();
@@ -654,6 +638,39 @@ async function load() {
     );
   }
 }
+
+  async function doCalendarDiscard(event) {
+    if (!event.id || !window.confirm(`Discard "${event.subject || "this meeting"}"?`)) return;
+
+    if (event.isOrganizer === false) {
+      setD(previous => ({
+        ...previous,
+        c: previous.c.filter(item => item.id !== event.id)
+      }));
+      setToast(`"${event.subject || "Meeting"}" removed from this calendar view. Only the organizer can delete it from Outlook.`);
+      return;
+    }
+
+    try {
+      const t = await token();
+      await deleteCalendarEvent(t, event.id);
+      setD(previous => ({
+        ...previous,
+        c: previous.c.filter(item => item.id !== event.id)
+      }));
+      setToast(`"${event.subject || "Meeting"}" discarded.`);
+    } catch (e) {
+      if (e.message?.includes("403")) {
+        setD(previous => ({
+          ...previous,
+          c: previous.c.filter(item => item.id !== event.id)
+        }));
+        setToast(`"${event.subject || "Meeting"}" removed from this calendar view. Outlook did not allow deleting it.`);
+        return;
+      }
+      setToast(`Meeting discard failed: ${e.message}`);
+    }
+  }
 
 function openMeetingMail(event) {
  
@@ -734,7 +751,7 @@ function openMeetingMail(event) {
         setProfileOpen={setProfileOpen}
         notificationCount={notifications.filter(item => !item.read).length}
         onToggleNotifications={() => setNotificationsOpen(v => !v)}
-        onToggleSidebar={() => setSidebarOpen(v => !v)}
+        onToggleSidebar={() => setSidebarCollapsed(v => !v)}
       />
 
       <NotificationCenter
@@ -748,7 +765,7 @@ function openMeetingMail(event) {
         onAskAI={askAIForNotification}
       />
 
-      <div className={`layout ${sidebarOpen ? "" : "sidebarCollapsed"} ${mod === "workplace" ? "hideRight" : ""}`}>
+      <div className={`layout${sidebarCollapsed ? " sidebarCollapsed" : ""}`}>
         <Sidebar
           mod={mod}
           setMod={setMod}
@@ -797,6 +814,7 @@ function openMeetingMail(event) {
           {mod === "mail" && (
             <Mail
               m={d.m}
+              junk={d.junk}
               sent={d.sent}
               ask={ask}
               reply={openReply}
@@ -804,6 +822,8 @@ function openMeetingMail(event) {
               important={doImportant}
               markRead={doRead}
               projects={projects}
+              onRefresh={refreshMail}
+              refreshing={mailRefreshing}
             />
           )}
           {mod === "calendar" && (
@@ -830,6 +850,9 @@ function openMeetingMail(event) {
       }
     }}
     onImportant={doCalendarImportant}
+    onDiscard={doCalendarDiscard}
+    onRefresh={refreshCalendar}
+    refreshing={calendarRefreshing}
   />
 )}
  
@@ -845,10 +868,10 @@ function openMeetingMail(event) {
           {mod === "projects" && <Projects />}
           {mod === "waiting" && <Waiting ask={ask} />}
           {mod === "workplace" && <Workplace />}
-          {mod === "rooms" && <Rooms c={d.c} profile={d.p} ask={ask} />}
+          {mod === "rooms" && <Rooms />}
         </main>
 
-        {mod !== "workplace" && <Right set={setMod} />}
+        <Right set={setMod} />
       </div>
 
       {modal && (
