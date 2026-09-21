@@ -765,7 +765,7 @@ function openMeetingMail(event) {
         onAskAI={askAIForNotification}
       />
 
-      <div className={`layout${sidebarCollapsed ? " sidebarCollapsed" : ""}`}>
+      <div className={`layout${sidebarCollapsed ? " sidebarCollapsed" : ""}${mod !== "home" ? " hideRight" : " todayLayout"}`}>
         <Sidebar
           mod={mod}
           setMod={setMod}
@@ -871,7 +871,7 @@ function openMeetingMail(event) {
           {mod === "rooms" && <Rooms />}
         </main>
 
-        <Right set={setMod} />
+        {mod === "home" && <Right set={setMod} />}
       </div>
 
       {modal && (

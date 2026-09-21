@@ -265,6 +265,10 @@ header {
   transition: grid-template-columns .25s ease
 }
 
+.layout.todayLayout {
+  transition: none
+}
+
 .layout.sidebarCollapsed {
   grid-template-columns: 0px minmax(0, 1fr) 315px
 }
@@ -275,6 +279,11 @@ header {
 
 .layout.sidebarCollapsed.hideRight {
   grid-template-columns: 0px minmax(0, 1fr) 0px
+}
+
+.layout.hideRight main > .module,
+.layout.hideRight main > .cp {
+  max-width: none
 }
 
 .layout > aside {

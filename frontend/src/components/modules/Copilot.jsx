@@ -72,7 +72,6 @@ export function Copilot({
         {msgs.length === 0 && (
           <div className="empty">
             <h3>What can I help you with?</h3>
-            <p>Try a command below. I’ll use your authorized work context and remember this conversation locally.</p>
           </div>
         )}
         {msgs.map((m, i) => (
